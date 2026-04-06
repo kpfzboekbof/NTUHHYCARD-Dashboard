@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const labelers = getLabelers();
+    const labelers = await getLabelers();
     const rawRows = await fetchEtiologyStatus();
     const { records, stats } = transformEtiology(rawRows, labelers);
 

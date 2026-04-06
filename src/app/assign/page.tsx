@@ -14,7 +14,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function AssignPage() {
   const { data: compData, refresh } = useCompletionData();
-  const { data: ownerData, mutate: mutateOwners } = useSWR<{ users: User[]; assignments: OwnerAssignments; hiddenForms: string[]; targetIds: { basic: number | null; exam: number | null } }>(
+  const { data: ownerData, mutate: mutateOwners } = useSWR<{ users: User[]; assignments: OwnerAssignments; hiddenForms: string[]; targetIds: { basic: number | null; exam: number | null }; labelers: { code: number; name: string }[] }>(
     '/api/owners', fetcher
   );
 
@@ -61,6 +61,7 @@ export default function AssignPage() {
   const [draftHidden, setDraftHidden] = useState<Set<string>>(new Set());
   const [draftTargetBasic, setDraftTargetBasic] = useState<string>('');
   const [draftTargetExam, setDraftTargetExam] = useState<string>('');
+  const [draftLabelers, setDraftLabelers] = useState<{ code: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
 
   const startEdit = useCallback(() => {
@@ -68,6 +69,7 @@ export default function AssignPage() {
     setDraftHidden(new Set(ownerData?.hiddenForms ?? []));
     setDraftTargetBasic(ownerData?.targetIds?.basic?.toString() ?? '');
     setDraftTargetExam(ownerData?.targetIds?.exam?.toString() ?? '');
+    setDraftLabelers((ownerData?.labelers ?? []).map(l => ({ code: l.code.toString(), name: l.name })));
     setEditing(true);
   }, [ownerData]);
 
@@ -97,6 +99,9 @@ export default function AssignPage() {
             basic: draftTargetBasic ? parseInt(draftTargetBasic) : null,
             exam: draftTargetExam ? parseInt(draftTargetExam) : null,
           },
+          labelers: draftLabelers
+            .filter(l => l.code && l.name)
+            .map(l => ({ code: parseInt(l.code), name: l.name })),
         }),
       });
       if (!res.ok) {
@@ -277,6 +282,68 @@ export default function AssignPage() {
                 );
               })}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Labelers management */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Etiology 標記者設定</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {editing ? (
+              <div className="space-y-2">
+                {draftLabelers.map((l, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="w-20 rounded border px-2 py-1 text-sm"
+                      placeholder="代碼"
+                      value={l.code}
+                      onChange={e => {
+                        const next = [...draftLabelers];
+                        next[i] = { ...next[i], code: e.target.value };
+                        setDraftLabelers(next);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      className="w-40 rounded border px-2 py-1 text-sm"
+                      placeholder="姓名"
+                      value={l.name}
+                      onChange={e => {
+                        const next = [...draftLabelers];
+                        next[i] = { ...next[i], name: e.target.value };
+                        setDraftLabelers(next);
+                      }}
+                    />
+                    <button
+                      className="text-red-400 hover:text-red-600 text-sm"
+                      onClick={() => setDraftLabelers(prev => prev.filter((_, j) => j !== i))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  className="text-sm text-blue-600 hover:underline"
+                  onClick={() => setDraftLabelers(prev => [...prev, { code: '', name: '' }])}
+                >
+                  + 新增標記者
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(ownerData?.labelers ?? []).map(l => (
+                  <span key={l.code} className="rounded bg-zinc-100 px-3 py-1 text-sm dark:bg-zinc-800">
+                    {l.name} (code: {l.code})
+                  </span>
+                ))}
+                {(ownerData?.labelers ?? []).length === 0 && (
+                  <span className="text-sm text-zinc-400">尚未設定（點擊「編輯」來新增）</span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

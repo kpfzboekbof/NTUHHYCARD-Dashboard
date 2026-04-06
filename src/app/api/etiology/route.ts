@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCached, setCached } from '@/lib/cache';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
+import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
@@ -13,12 +14,14 @@ export async function GET() {
       return NextResponse.json(cached);
     }
 
+    const labelers = getLabelers();
     const rawRows = await fetchEtiologyStatus();
-    const { records, stats } = transformEtiology(rawRows);
+    const { records, stats } = transformEtiology(rawRows, labelers);
 
     const data: EtiologyResponse = {
       records,
       stats,
+      labelers,
       fetchedAt: new Date().toISOString(),
     };
 

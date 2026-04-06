@@ -39,6 +39,9 @@ yarn-error.log*
 # claude code
 .claude/
 
+# runtime data (contains usernames/personal info)
+/data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

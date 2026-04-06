@@ -1,10 +1,7 @@
-export const LABELERS: { code: number; name: string }[] = [
-  { code: 0, name: '范程羿' },
-  { code: 3, name: '陳麒心' },
-  { code: 5, name: '陳雲昶' },
-  { code: 6, name: '黃嗣翔' },
-  { code: 7, name: '黃俊翔' },
-];
+export interface Labeler {
+  code: number;
+  name: string;
+}
 
 export const ETIOLOGY_FINAL_MAP: Record<number, string> = {
   0: 'Presumed cardiac/unknown',
@@ -48,10 +45,11 @@ export interface EtiologyStats {
 export interface EtiologyResponse {
   records: EtiologyRecord[];
   stats: EtiologyStats;
+  labelers: Labeler[];
   fetchedAt: string;
 }
 
-export function transformEtiology(rawRows: Record<string, string>[]): {
+export function transformEtiology(rawRows: Record<string, string>[], labelers: Labeler[]): {
   records: EtiologyRecord[];
   stats: EtiologyStats;
 } {
@@ -103,7 +101,7 @@ export function transformEtiology(rawRows: Record<string, string>[]): {
       studyId,
       finalCode: entry.finalCode,
       finalLabel: entry.finalCode !== null ? (ETIOLOGY_FINAL_MAP[entry.finalCode] ?? `Code ${entry.finalCode}`) : null,
-      reviewers: LABELERS.map(l => ({
+      reviewers: labelers.map(l => ({
         labelerCode: l.code,
         name: l.name,
         complete: entry.completedLabelers.has(l.code),

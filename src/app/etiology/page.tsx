@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import { useEtiologyData } from '@/hooks/use-etiology-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LABELERS } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
 
@@ -14,6 +13,8 @@ export default function EtiologyPage() {
   const [idFrom, setIdFrom] = useState('');
   const [idTo, setIdTo] = useState('');
   const [page, setPage] = useState(0);
+
+  const labelers = data?.labelers ?? [];
 
   const incompleteRecords = useMemo(() => {
     if (!data?.records) return [];
@@ -110,7 +111,7 @@ export default function EtiologyPage() {
                     <thead>
                       <tr className="border-b text-left text-zinc-500">
                         <th className="px-3 py-2 sticky left-0 bg-white dark:bg-zinc-950">Study ID</th>
-                        {LABELERS.map(l => (
+                        {labelers.map(l => (
                           <th key={l.code} className="px-2 py-2 text-center whitespace-nowrap">{l.name}</th>
                         ))}
                       </tr>
@@ -132,7 +133,7 @@ export default function EtiologyPage() {
                       ))}
                       {pageRows.length === 0 && (
                         <tr>
-                          <td colSpan={1 + LABELERS.length} className="px-3 py-8 text-center text-zinc-400">
+                          <td colSpan={1 + labelers.length} className="px-3 py-8 text-center text-zinc-400">
                             {search ? '無符合的記錄' : '所有記錄皆已完成共識'}
                           </td>
                         </tr>

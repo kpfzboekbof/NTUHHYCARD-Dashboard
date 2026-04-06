@@ -1,13 +1,12 @@
 import Link from 'next/link';
 import {
-  LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope,
+  LayoutDashboard, Grid3X3, Users, ListChecks, Keyboard, Stethoscope,
 } from 'lucide-react';
 
 const PAGES = [
   { href: '/dashboard',    label: '總覽',       desc: '檢視整體完成率與各表單進度',     icon: LayoutDashboard, color: 'bg-blue-500' },
   { href: '/heatmap',      label: '熱力圖',     desc: '以熱力圖呈現各記錄完成狀態',     icon: Grid3X3,         color: 'bg-emerald-500' },
   { href: '/owners',       label: '負責人進度', desc: '各負責人的完成率與統計分析',       icon: Users,           color: 'bg-violet-500' },
-  { href: '/assign',       label: '管理者',     desc: '負責人指派、表單顯示設定與目標管理（需登入）', icon: Shield, color: 'bg-amber-500' },
   { href: '/etiology',     label: 'Etiology',   desc: '追蹤病因共識審查進度與 final 完成狀態', icon: Stethoscope, color: 'bg-teal-500' },
   { href: '/incomplete',   label: '未完成清單', desc: '列出所有未完成與未驗證的記錄',     icon: ListChecks,      color: 'bg-rose-500' },
   { href: '/productivity', label: '鍵入進度',   desc: '追蹤各負責人的鍵入活動與時間軸',  icon: Keyboard,        color: 'bg-cyan-500' },

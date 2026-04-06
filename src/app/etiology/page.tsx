@@ -30,6 +30,9 @@ export default function EtiologyPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
+  // Last visited (highlight)
+  const [lastVisited, setLastVisited] = useState<string | null>(null);
+
   // Per-row save state: studyId → 'saving' | 'error'
   const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
 
@@ -232,11 +235,15 @@ export default function EtiologyPage() {
                     <tbody>
                       {pageRows.map(r => {
                         const isSaving = rowState[r.studyId] === 'saving';
+                        const isVisited = lastVisited === r.studyId;
                         return (
-                          <tr key={r.studyId} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                          <tr key={r.studyId} className={`border-b transition-colors ${isVisited ? 'bg-amber-100 dark:bg-amber-900/40' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
                             <td
-                              className="px-3 py-1.5 font-mono text-xs sticky left-0 bg-white dark:bg-zinc-950 text-blue-600 cursor-pointer hover:underline"
-                              onClick={() => window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank')}
+                              className={`px-3 py-1.5 font-mono text-xs sticky left-0 cursor-pointer hover:underline text-blue-600 ${isVisited ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-white dark:bg-zinc-950'}`}
+                              onClick={() => {
+                                setLastVisited(r.studyId);
+                                window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank');
+                              }}
                             >{r.studyId}</td>
                             {r.reviewers.map(rev => (
                               <td key={rev.labelerCode} className="px-2 py-1.5 text-center">

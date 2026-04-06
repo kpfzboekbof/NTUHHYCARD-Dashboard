@@ -10,6 +10,7 @@ interface TargetProgressProps {
   rows: CompletionRow[];
   targetIds: { basic: number | null; exam: number | null };
   hiddenForms?: string[];
+  ownerFilter?: string;
 }
 
 function calcFormStats(rows: CompletionRow[], targetId: number, formNames: string[], hiddenForms: string[]) {
@@ -90,18 +91,28 @@ function TargetSection({ title, targetId, formStats }: {
   );
 }
 
-export function TargetProgress({ rows, targetIds, hiddenForms = [] }: TargetProgressProps) {
+export function TargetProgress({ rows, targetIds, hiddenForms = [], ownerFilter }: TargetProgressProps) {
   const basicFormNames = FORMS.map(f => f.name).filter(n => !EXAM_FORMS.includes(n));
+
+  // When a specific owner is selected, only show their assigned forms
+  const ownerForms = useMemo(() => {
+    if (!ownerFilter || ownerFilter === '全部') return null;
+    return new Set(rows.filter(r => r.owner === ownerFilter).map(r => r.form));
+  }, [rows, ownerFilter]);
 
   const basicStats = useMemo(() => {
     if (!targetIds.basic) return null;
-    return calcFormStats(rows, targetIds.basic, basicFormNames, hiddenForms);
-  }, [rows, targetIds.basic, hiddenForms]);
+    const names = ownerForms ? basicFormNames.filter(n => ownerForms.has(n)) : basicFormNames;
+    if (names.length === 0) return null;
+    return calcFormStats(rows, targetIds.basic, names, hiddenForms);
+  }, [rows, targetIds.basic, hiddenForms, ownerForms]);
 
   const examStats = useMemo(() => {
     if (!targetIds.exam) return null;
-    return calcFormStats(rows, targetIds.exam, EXAM_FORMS, hiddenForms);
-  }, [rows, targetIds.exam, hiddenForms]);
+    const names = ownerForms ? EXAM_FORMS.filter(n => ownerForms.has(n)) : EXAM_FORMS;
+    if (names.length === 0) return null;
+    return calcFormStats(rows, targetIds.exam, names, hiddenForms);
+  }, [rows, targetIds.exam, hiddenForms, ownerForms]);
 
   if (!basicStats && !examStats) return null;
 

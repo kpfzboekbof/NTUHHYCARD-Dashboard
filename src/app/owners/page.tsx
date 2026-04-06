@@ -97,7 +97,7 @@ export default function OwnersPage() {
         ) : (
           <>
             {data?.targetIds && (data.targetIds.basic || data.targetIds.exam) && (
-              <TargetProgress rows={rows} targetIds={data.targetIds} hiddenForms={data.hiddenForms} />
+              <TargetProgress rows={rows} targetIds={data.targetIds} hiddenForms={data.hiddenForms} ownerFilter={filters.owner} />
             )}
 
             {/* Owner bar chart + heatmap */}

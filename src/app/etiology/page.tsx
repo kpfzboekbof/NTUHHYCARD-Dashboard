@@ -87,6 +87,7 @@ export default function EtiologyPage() {
   const handleLogout = useCallback(async () => {
     await fetch('/api/auth', { method: 'DELETE' });
     setAdminMode(false);
+    setViewMode('tracking');
   }, []);
 
   // Write etiology_final for a record
@@ -227,29 +228,31 @@ export default function EtiologyPage() {
                   />
                 </div>
 
-                {/* View mode tabs */}
-                <div className="mt-3 flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800 w-fit">
-                  <button
-                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                      viewMode === 'tracking'
-                        ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
-                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-                    }`}
-                    onClick={() => setViewMode('tracking')}
-                  >
-                    追蹤
-                  </button>
-                  <button
-                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                      viewMode === 'consensus'
-                        ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
-                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-                    }`}
-                    onClick={() => setViewMode('consensus')}
-                  >
-                    共識會議
-                  </button>
-                </div>
+                {/* View mode tabs (consensus requires admin) */}
+                {adminMode && (
+                  <div className="mt-3 flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800 w-fit">
+                    <button
+                      className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                        viewMode === 'tracking'
+                          ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
+                          : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                      }`}
+                      onClick={() => setViewMode('tracking')}
+                    >
+                      追蹤
+                    </button>
+                    <button
+                      className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                        viewMode === 'consensus'
+                          ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
+                          : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                      }`}
+                      onClick={() => setViewMode('consensus')}
+                    >
+                      共識會議
+                    </button>
+                  </div>
+                )}
               </CardHeader>
               <CardContent>
                 {/* Legend for consensus mode */}

@@ -198,8 +198,10 @@ export async function importEtiologyFinal(studyId: string, code: number): Promis
     data,
   });
   const text = await res.text();
-  const count = parseInt(text);
-  if (isNaN(count) || count < 1) {
+  // REDCap may return "1", "count:1", or {"count":1} depending on version
+  const match = text.match(/(\d+)/);
+  const count = match ? parseInt(match[1]) : 0;
+  if (count < 1) {
     throw new Error(`REDCap import returned unexpected response: ${text}`);
   }
 }

@@ -34,6 +34,7 @@ export default function IncompletePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'Incomplete' | 'Unverified'>('all');
   const [formFilter, setFormFilter] = useState(initialForm);
   const [targetOnly, setTargetOnly] = useState(false);
+  const [visited, setVisited] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
@@ -140,11 +141,21 @@ export default function IncompletePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {pageRows.map((r, i) => (
+                      {pageRows.map((r, i) => {
+                        const rowKey = `${r.studyId}-${r.form}`;
+                        const isVisited = visited.has(rowKey);
+                        return (
                         <tr
-                          key={`${r.studyId}-${r.form}-${i}`}
-                          className="border-b hover:bg-blue-50 dark:hover:bg-blue-950 cursor-pointer"
-                          onClick={() => window.open(redcapRecordUrl(r.studyId, r.form), '_blank')}
+                          key={`${rowKey}-${i}`}
+                          className={`border-b cursor-pointer transition-colors ${
+                            isVisited
+                              ? 'bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 dark:hover:bg-amber-900/60'
+                              : 'hover:bg-blue-50 dark:hover:bg-blue-950'
+                          }`}
+                          onClick={() => {
+                            setVisited(prev => new Set(prev).add(rowKey));
+                            window.open(redcapRecordUrl(r.studyId, r.form), '_blank');
+                          }}
                         >
                           <td className="px-3 py-1.5 font-mono text-xs text-blue-600 flex items-center gap-1">
                             {r.studyId}
@@ -163,7 +174,8 @@ export default function IncompletePage() {
                             </span>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

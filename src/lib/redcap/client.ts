@@ -181,7 +181,7 @@ export async function fetchEtiologyStatus(): Promise<Record<string, string>[]> {
   const res = await redcapPost({
     content: 'record',
     format: 'csv',
-    fields: 'study_id,exclusion,labeler,etiology_final,ntuh_nhi_etiology_complete',
+    fields: 'study_id,exclusion,labeler,etiology_final,ntuh_nhi_etiology_complete,cause_all_etiology_new,cause_med_etiology_new,cause_tra_etiology_new,cause_asphy_etiology_new',
   });
   const text = await res.text();
   return parseCsv(text);

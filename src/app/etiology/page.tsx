@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Lock, Unlock } from 'lucide-react';
 import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
+import type { ConsensusStatus } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
 
@@ -15,12 +16,24 @@ const ETIOLOGY_OPTIONS = Object.entries(ETIOLOGY_FINAL_MAP).map(([code, label]) 
   label,
 }));
 
+type ViewMode = 'tracking' | 'consensus';
+
+/** Row background class based on consensus status (consensus mode only) */
+function consensusBgClass(status: ConsensusStatus): string {
+  switch (status) {
+    case 'yellow': return 'bg-yellow-50 dark:bg-yellow-900/20';
+    case 'green': return 'bg-green-50 dark:bg-green-900/20';
+    case 'red': return 'bg-red-50 dark:bg-red-900/20';
+  }
+}
+
 export default function EtiologyPage() {
   const { data, isLoading, refresh } = useEtiologyData();
   const [search, setSearch] = useState('');
   const [idFrom, setIdFrom] = useState('');
   const [idTo, setIdTo] = useState('');
   const [page, setPage] = useState(0);
+  const [viewMode, setViewMode] = useState<ViewMode>('tracking');
 
   // Admin state
   const [adminMode, setAdminMode] = useState(false);
@@ -91,7 +104,6 @@ export default function EtiologyPage() {
         setRowState(prev => ({ ...prev, [studyId]: 'error' }));
         return;
       }
-      // Success — refresh data (the record will disappear from incomplete list)
       refresh();
       setRowState(prev => {
         const next = { ...prev };
@@ -158,7 +170,7 @@ export default function EtiologyPage() {
               </Card>
             </div>
 
-            {/* Incomplete records table */}
+            {/* Records table */}
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-center gap-4">
@@ -214,16 +226,58 @@ export default function EtiologyPage() {
                     onChange={e => { setSearch(e.target.value); setPage(0); }}
                   />
                 </div>
+
+                {/* View mode tabs */}
+                <div className="mt-3 flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800 w-fit">
+                  <button
+                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                      viewMode === 'tracking'
+                        ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
+                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                    onClick={() => setViewMode('tracking')}
+                  >
+                    追蹤
+                  </button>
+                  <button
+                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                      viewMode === 'consensus'
+                        ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
+                        : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                    onClick={() => setViewMode('consensus')}
+                  >
+                    共識會議
+                  </button>
+                </div>
               </CardHeader>
               <CardContent>
+                {/* Legend for consensus mode */}
+                {viewMode === 'consensus' && (
+                  <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-3 w-3 rounded bg-green-200 dark:bg-green-800" /> 已達共識（3:0, 4:0, 5:0, 3:1, 4:1）
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-3 w-3 rounded bg-red-200 dark:bg-red-800" /> 需要共識討論
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block h-3 w-3 rounded bg-yellow-200 dark:bg-yellow-800" /> 票數不足（&lt;3），無法進入共識
+                    </span>
+                  </div>
+                )}
+
                 <div className="overflow-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-zinc-500">
-                        <th className="px-3 py-2 sticky left-0 bg-white dark:bg-zinc-950">Study ID</th>
+                        <th className="px-3 py-2 sticky left-0 bg-white dark:bg-zinc-950 z-10">Study ID</th>
                         {labelers.map(l => (
                           <th key={l.code} className="px-2 py-2 text-center whitespace-nowrap">{l.name}</th>
                         ))}
+                        {viewMode === 'consensus' && (
+                          <th className="px-2 py-2 text-center whitespace-nowrap text-zinc-400">票數</th>
+                        )}
                         <th className="px-3 py-2 text-center whitespace-nowrap">
                           etiology_final
                           {!adminMode && (
@@ -236,26 +290,65 @@ export default function EtiologyPage() {
                       {pageRows.map(r => {
                         const isSaving = rowState[r.studyId] === 'saving';
                         const isVisited = lastVisited === r.studyId;
+                        const isConsensus = viewMode === 'consensus';
+                        const isYellow = r.consensusStatus === 'yellow';
+                        const dropdownDisabled = isSaving || (isConsensus && isYellow);
+
+                        // Row background
+                        const rowBg = isVisited
+                          ? 'bg-amber-100 dark:bg-amber-900/40'
+                          : isConsensus
+                            ? consensusBgClass(r.consensusStatus)
+                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-800';
+
+                        // Sticky cell background (must match row)
+                        const stickyBg = isVisited
+                          ? 'bg-amber-100 dark:bg-amber-900/40'
+                          : isConsensus
+                            ? consensusBgClass(r.consensusStatus)
+                            : 'bg-white dark:bg-zinc-950';
+
                         return (
-                          <tr key={r.studyId} className={`border-b transition-colors ${isVisited ? 'bg-amber-100 dark:bg-amber-900/40' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
+                          <tr key={r.studyId} className={`border-b transition-colors ${rowBg}`}>
                             <td
-                              className={`px-3 py-1.5 font-mono text-xs sticky left-0 cursor-pointer hover:underline text-blue-600 ${isVisited ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-white dark:bg-zinc-950'}`}
+                              className={`px-3 py-1.5 font-mono text-xs sticky left-0 z-10 cursor-pointer hover:underline text-blue-600 ${stickyBg}`}
                               onClick={() => {
                                 setLastVisited(r.studyId);
                                 window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank');
                               }}
                             >{r.studyId}</td>
+
+                            {/* Reviewer columns */}
                             {r.reviewers.map(rev => (
                               <td key={rev.labelerCode} className="px-2 py-1.5 text-center">
-                                {rev.complete ? (
-                                  <span className="text-green-600 font-bold">✓</span>
+                                {isConsensus ? (
+                                  // Consensus mode: show cause code
+                                  rev.causeCode !== null ? (
+                                    <span className="font-mono text-xs font-medium">{rev.causeCode}</span>
+                                  ) : (
+                                    <span className="text-zinc-300">—</span>
+                                  )
                                 ) : (
-                                  <span className="text-zinc-300">—</span>
+                                  // Tracking mode: checkmark or dash
+                                  rev.complete ? (
+                                    <span className="text-green-600 font-bold">✓</span>
+                                  ) : (
+                                    <span className="text-zinc-300">—</span>
+                                  )
                                 )}
                               </td>
                             ))}
+
+                            {/* Vote count column (consensus only) */}
+                            {isConsensus && (
+                              <td className="px-2 py-1.5 text-center text-xs text-zinc-500">
+                                {r.completedCount}
+                              </td>
+                            )}
+
+                            {/* etiology_final dropdown */}
                             <td className="px-3 py-1.5 text-center">
-                              {adminMode ? (
+                              {adminMode && !dropdownDisabled ? (
                                 <select
                                   disabled={isSaving}
                                   className="rounded border px-1.5 py-0.5 text-xs w-48 disabled:opacity-50"
@@ -264,7 +357,7 @@ export default function EtiologyPage() {
                                     const val = e.target.value;
                                     if (val === '') return;
                                     handleSetFinal(r.studyId, parseInt(val));
-                                    e.target.value = ''; // reset after submit
+                                    e.target.value = '';
                                   }}
                                 >
                                   <option value="">— 選擇 —</option>
@@ -272,6 +365,8 @@ export default function EtiologyPage() {
                                     <option key={o.code} value={o.code}>{o.label}</option>
                                   ))}
                                 </select>
+                              ) : isConsensus && isYellow ? (
+                                <span className="text-[10px] text-zinc-400">需 ≥3 完成</span>
                               ) : (
                                 <span className="text-zinc-300 text-xs">—</span>
                               )}
@@ -284,7 +379,7 @@ export default function EtiologyPage() {
                       })}
                       {pageRows.length === 0 && (
                         <tr>
-                          <td colSpan={2 + labelers.length} className="px-3 py-8 text-center text-zinc-400">
+                          <td colSpan={2 + labelers.length + (viewMode === 'consensus' ? 1 : 0)} className="px-3 py-8 text-center text-zinc-400">
                             {search ? '無符合的記錄' : '所有記錄皆已完成共識'}
                           </td>
                         </tr>

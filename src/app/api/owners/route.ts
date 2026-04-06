@@ -24,13 +24,12 @@ async function getUsers(): Promise<User[]> {
 
 export async function GET() {
   try {
-    const [users, assignments, hiddenForms] = await Promise.all([
+    const [users, assignments, hiddenForms, targetIds] = await Promise.all([
       getUsers(),
-      Promise.resolve(getAssignments()),
-      Promise.resolve(getHiddenForms()),
+      getAssignments(),
+      getHiddenForms(),
+      getTargetIds(),
     ]);
-
-    const targetIds = getTargetIds();
     return NextResponse.json({ users, assignments, hiddenForms, targetIds });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -57,13 +56,13 @@ export async function PUT(request: Request) {
 
     const body: { assignments?: OwnerAssignments; hiddenForms?: string[]; targetIds?: TargetIds } = await request.json();
     if (body.assignments !== undefined) {
-      setAssignments(body.assignments);
+      await setAssignments(body.assignments);
     }
     if (body.hiddenForms !== undefined) {
-      setHiddenForms(body.hiddenForms);
+      await setHiddenForms(body.hiddenForms);
     }
     if (body.targetIds !== undefined) {
-      setTargetIds(body.targetIds);
+      await setTargetIds(body.targetIds);
     }
     return NextResponse.json({ ok: true });
   } catch (error) {

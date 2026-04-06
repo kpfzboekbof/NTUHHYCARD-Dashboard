@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const assignments = getAssignments();
+    const assignments = await getAssignments();
 
     let users = getCached<User[]>(USERS_CACHE_KEY);
     if (!users) {
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
 
     const rawLogs = await fetchLogging(months);
     const logs = transformLogs(rawLogs);
-    const targetIds = getTargetIds();
+    const targetIds = await getTargetIds();
     const stats = calcLoggingStats(logs, completionRows, months, assignments, users, targetIds);
 
     const data: LoggingResponse = {

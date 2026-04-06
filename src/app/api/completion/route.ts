@@ -15,8 +15,10 @@ export async function GET() {
       return NextResponse.json(cached);
     }
 
-    const assignments = getAssignments();
-    const hiddenForms = getHiddenForms();
+    const [assignments, hiddenForms] = await Promise.all([
+      getAssignments(),
+      getHiddenForms(),
+    ]);
 
     // Fetch users with cache
     let users = getCached<User[]>(USERS_CACHE_KEY);
@@ -54,7 +56,7 @@ export async function GET() {
       users,
       assignments,
       hiddenForms,
-      targetIds: getTargetIds(),
+      targetIds: await getTargetIds(),
       totalRecords: allStudyIds.size,
       validOhcaCount: validStudyIds.size,
       fetchedAt: new Date().toISOString(),

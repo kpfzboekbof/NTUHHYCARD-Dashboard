@@ -81,6 +81,13 @@ export default function OwnersPage() {
     return result;
   }, [rows]);
 
+  // When a specific owner is selected, only show their forms
+  const visibleForms = useMemo(() => {
+    if (filters.owner === '全部') return FORMS;
+    const ownerFormNames = new Set(ownerFormMatrix.map(x => x.form));
+    return FORMS.filter(f => ownerFormNames.has(f.name));
+  }, [filters.owner, ownerFormMatrix]);
+
   return (
     <div>
       <Header title="負責人進度" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} owners={owners} />
@@ -122,7 +129,7 @@ export default function OwnersPage() {
                       <thead className="sticky top-0 bg-white dark:bg-zinc-950">
                         <tr>
                           <th className="text-left px-2 py-1">負責人</th>
-                          {FORMS.map(f => (
+                          {visibleForms.map(f => (
                             <th key={f.name} className="px-1 py-1 font-normal" style={{ writingMode: 'vertical-rl', maxWidth: 20 }}>
                               {f.label}
                             </th>
@@ -133,7 +140,7 @@ export default function OwnersPage() {
                         {[...new Set(ownerFormMatrix.map(x => x.owner))].sort().map(owner => (
                           <tr key={owner}>
                             <td className="px-2 py-1 font-medium whitespace-nowrap">{owner}</td>
-                            {FORMS.map(f => {
+                            {visibleForms.map(f => {
                               const item = ownerFormMatrix.find(x => x.owner === owner && x.form === f.name);
                               const pct = item?.pct ?? 0;
                               const bg = pct >= 80 ? 'bg-green-400' : pct >= 50 ? 'bg-yellow-300' : pct > 0 ? 'bg-red-300' : 'bg-zinc-100';

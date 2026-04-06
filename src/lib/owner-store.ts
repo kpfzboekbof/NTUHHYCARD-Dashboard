@@ -14,33 +14,27 @@ interface StoreData {
 
 const KV_KEY = 'owner-store';
 
-/* ── Vercel KV / Redis (production) ─────────────────────── */
+/* ── Redis via @upstash/redis (Vercel production) ──────── */
 
-async function getKVClient() {
-  const { createClient } = await import('@vercel/kv');
-  // Support multiple env var naming conventions from Vercel integrations
-  const url = process.env.KV_REST_API_URL || process.env.REDIS_URL || '';
-  const token = process.env.KV_REST_API_TOKEN || process.env.REDIS_TOKEN || '';
-  return createClient({ url, token });
+async function getRedisClient() {
+  const { Redis } = await import('@upstash/redis');
+  // Vercel Redis integration sets REDIS_URL automatically
+  return Redis.fromEnv();
 }
 
-async function readKV(): Promise<StoreData> {
+async function readRedis(): Promise<StoreData> {
   try {
-    const client = await getKVClient();
-    const data = await client.get<StoreData>(KV_KEY);
+    const redis = await getRedisClient();
+    const data = await redis.get<StoreData>(KV_KEY);
     return data ?? {};
   } catch {
     return {};
   }
 }
 
-async function writeKV(data: StoreData): Promise<void> {
-  try {
-    const client = await getKVClient();
-    await client.set(KV_KEY, data);
-  } catch (err) {
-    throw new Error(`KV write failed: ${err instanceof Error ? err.message : String(err)}. Check that Redis/KV is connected in Vercel Storage settings.`);
-  }
+async function writeRedis(data: StoreData): Promise<void> {
+  const redis = await getRedisClient();
+  await redis.set(KV_KEY, data);
 }
 
 /* ── Local file (development) ───────────────────────────── */
@@ -66,20 +60,14 @@ async function writeLocal(data: StoreData): Promise<void> {
 
 /* ── Auto-detect environment ────────────────────────────── */
 
-// Vercel Redis integration may use REDIS_URL, KV_REST_API_URL, or KV_URL
 const isVercel = !!process.env.VERCEL;
-const hasKV = !!(process.env.KV_REST_API_URL || process.env.KV_URL || process.env.REDIS_URL);
 
 async function readStore(): Promise<StoreData> {
-  if (hasKV) return readKV();
-  if (isVercel) return readKV(); // always try KV on Vercel, never fs
-  return readLocal();
+  return isVercel ? readRedis() : readLocal();
 }
 
 async function writeStore(data: StoreData): Promise<void> {
-  if (hasKV) return writeKV(data);
-  if (isVercel) return writeKV(data);
-  return writeLocal(data);
+  return isVercel ? writeRedis(data) : writeLocal(data);
 }
 
 /* ── Public API (all async) ─────────────────────────────── */
@@ -109,7 +97,6 @@ export async function setHiddenForms(hiddenForms: string[]): Promise<void> {
 export async function getTargetIds(): Promise<TargetIds> {
   const data = await readStore();
   if (data.targetIds) return data.targetIds;
-  // Migrate from legacy single targetId
   const legacy = data.targetId ?? null;
   return { basic: legacy, exam: legacy };
 }
@@ -117,6 +104,6 @@ export async function getTargetIds(): Promise<TargetIds> {
 export async function setTargetIds(targetIds: TargetIds): Promise<void> {
   const data = await readStore();
   data.targetIds = targetIds;
-  delete data.targetId; // remove legacy
+  delete data.targetId;
   await writeStore(data);
 }

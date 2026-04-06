@@ -14,12 +14,20 @@ interface StoreData {
 
 const KV_KEY = 'owner-store';
 
-/* ── Vercel KV (production) ─────────────────────────────── */
+/* ── Vercel KV / Redis (production) ─────────────────────── */
+
+async function getKVClient() {
+  const { createClient } = await import('@vercel/kv');
+  // Support multiple env var naming conventions from Vercel integrations
+  const url = process.env.KV_REST_API_URL || process.env.REDIS_URL || '';
+  const token = process.env.KV_REST_API_TOKEN || process.env.REDIS_TOKEN || '';
+  return createClient({ url, token });
+}
 
 async function readKV(): Promise<StoreData> {
   try {
-    const { kv } = await import('@vercel/kv');
-    const data = await kv.get<StoreData>(KV_KEY);
+    const client = await getKVClient();
+    const data = await client.get<StoreData>(KV_KEY);
     return data ?? {};
   } catch {
     return {};
@@ -28,8 +36,8 @@ async function readKV(): Promise<StoreData> {
 
 async function writeKV(data: StoreData): Promise<void> {
   try {
-    const { kv } = await import('@vercel/kv');
-    await kv.set(KV_KEY, data);
+    const client = await getKVClient();
+    await client.set(KV_KEY, data);
   } catch (err) {
     throw new Error(`KV write failed: ${err instanceof Error ? err.message : String(err)}. Check that Redis/KV is connected in Vercel Storage settings.`);
   }
@@ -58,9 +66,9 @@ async function writeLocal(data: StoreData): Promise<void> {
 
 /* ── Auto-detect environment ────────────────────────────── */
 
-// Vercel Redis integration may use KV_REST_API_URL or KV_URL
+// Vercel Redis integration may use REDIS_URL, KV_REST_API_URL, or KV_URL
 const isVercel = !!process.env.VERCEL;
-const hasKV = !!(process.env.KV_REST_API_URL || process.env.KV_URL);
+const hasKV = !!(process.env.KV_REST_API_URL || process.env.KV_URL || process.env.REDIS_URL);
 
 async function readStore(): Promise<StoreData> {
   if (hasKV) return readKV();

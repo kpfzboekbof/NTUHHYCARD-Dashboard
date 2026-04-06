@@ -33,6 +33,7 @@ export default function IncompletePage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Incomplete' | 'Unverified'>('all');
   const [formFilter, setFormFilter] = useState(initialForm);
+  const [targetOnly, setTargetOnly] = useState(false);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
@@ -40,8 +41,14 @@ export default function IncompletePage() {
   const hiddenForms = data?.hiddenForms ?? [];
   const visibleForms = FORMS.filter(f => !hiddenForms.includes(f.name));
 
+  const targetIds = data?.targetIds;
+  const targetId = targetIds ? Math.max(targetIds.basic ?? 0, targetIds.exam ?? 0) : 0;
+
   const incompleteRows = useMemo(() => {
     let result = rows.filter(r => r.statusCode !== 2 && !r.excluded);
+    if (targetOnly && targetId > 0) {
+      result = result.filter(r => parseInt(r.studyId) <= targetId);
+    }
     if (statusFilter !== 'all') {
       result = result.filter(r => r.status === statusFilter);
     }
@@ -58,7 +65,7 @@ export default function IncompletePage() {
       );
     }
     return result.sort((a, b) => a.owner.localeCompare(b.owner) || a.form.localeCompare(b.form) || a.studyId.localeCompare(b.studyId));
-  }, [rows, statusFilter, formFilter, search]);
+  }, [rows, statusFilter, formFilter, search, targetOnly, targetId]);
 
   const pageRows = incompleteRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(incompleteRows.length / PAGE_SIZE);
@@ -95,6 +102,18 @@ export default function IncompletePage() {
                 <option value="Incomplete">Incomplete</option>
                 <option value="Unverified">Unverified</option>
               </select>
+              {targetId > 0 && (
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={targetOnly}
+                    onChange={e => { setTargetOnly(e.target.checked); setPage(0); }}
+                    className="rounded"
+                  />
+                  <span>目標進度</span>
+                  <span className="text-xs text-zinc-400">(ID ≤ {targetId})</span>
+                </label>
+              )}
               <input
                 type="text"
                 placeholder="搜尋 Study ID..."

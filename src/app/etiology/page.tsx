@@ -1,11 +1,19 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useEtiologyData } from '@/hooks/use-etiology-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Lock, Unlock } from 'lucide-react';
+import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
+
+const ETIOLOGY_OPTIONS = Object.entries(ETIOLOGY_FINAL_MAP).map(([code, label]) => ({
+  code: parseInt(code),
+  label,
+}));
 
 export default function EtiologyPage() {
   const { data, isLoading, refresh } = useEtiologyData();
@@ -13,6 +21,85 @@ export default function EtiologyPage() {
   const [idFrom, setIdFrom] = useState('');
   const [idTo, setIdTo] = useState('');
   const [page, setPage] = useState(0);
+
+  // Admin state
+  const [adminMode, setAdminMode] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+
+  // Per-row save state: studyId → 'saving' | 'error'
+  const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
+
+  // Check admin auth on mount
+  useEffect(() => {
+    fetch('/api/auth').then(r => r.json()).then(d => {
+      if (d.authenticated) setAdminMode(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (showLoginModal) {
+      setTimeout(() => passwordInputRef.current?.focus(), 50);
+    }
+  }, [showLoginModal]);
+
+  const handleLogin = useCallback(async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setAdminMode(true);
+        setShowLoginModal(false);
+        setPassword('');
+      } else {
+        setAuthError(d.error || '密碼錯誤');
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [password]);
+
+  const handleLogout = useCallback(async () => {
+    await fetch('/api/auth', { method: 'DELETE' });
+    setAdminMode(false);
+  }, []);
+
+  // Write etiology_final for a record
+  const handleSetFinal = useCallback(async (studyId: string, code: number) => {
+    setRowState(prev => ({ ...prev, [studyId]: 'saving' }));
+    try {
+      const res = await fetch('/api/etiology', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studyId, code }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        alert(d.error || '儲存失敗');
+        setRowState(prev => ({ ...prev, [studyId]: 'error' }));
+        return;
+      }
+      // Success — refresh data (the record will disappear from incomplete list)
+      refresh();
+      setRowState(prev => {
+        const next = { ...prev };
+        delete next[studyId];
+        return next;
+      });
+    } catch {
+      alert('網路錯誤，請稍後再試');
+      setRowState(prev => ({ ...prev, [studyId]: 'error' }));
+    }
+  }, [refresh]);
 
   const labelers = data?.labelers ?? [];
 
@@ -78,6 +165,26 @@ export default function EtiologyPage() {
                       ({incompleteRecords.length.toLocaleString()} 筆)
                     </span>
                   </CardTitle>
+
+                  {/* Admin toggle */}
+                  {adminMode ? (
+                    <button
+                      onClick={handleLogout}
+                      className="flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300"
+                    >
+                      <Unlock className="h-3 w-3" />
+                      管理員模式
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowLoginModal(true)}
+                      className="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    >
+                      <Lock className="h-3 w-3" />
+                      管理員模式
+                    </button>
+                  )}
+
                   <div className="flex items-center gap-1 text-sm">
                     <span className="text-zinc-500">ID 範圍:</span>
                     <input
@@ -114,29 +221,63 @@ export default function EtiologyPage() {
                         {labelers.map(l => (
                           <th key={l.code} className="px-2 py-2 text-center whitespace-nowrap">{l.name}</th>
                         ))}
+                        <th className="px-3 py-2 text-center whitespace-nowrap">
+                          etiology_final
+                          {!adminMode && (
+                            <span className="ml-1 text-[10px] text-zinc-400">(需管理員)</span>
+                          )}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {pageRows.map(r => (
-                        <tr key={r.studyId} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800">
-                          <td
-                            className="px-3 py-1.5 font-mono text-xs sticky left-0 bg-white dark:bg-zinc-950 text-blue-600 cursor-pointer hover:underline"
-                            onClick={() => window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_outcome`, '_blank')}
-                          >{r.studyId}</td>
-                          {r.reviewers.map(rev => (
-                            <td key={rev.labelerCode} className="px-2 py-1.5 text-center">
-                              {rev.complete ? (
-                                <span className="text-green-600 font-bold">✓</span>
+                      {pageRows.map(r => {
+                        const isSaving = rowState[r.studyId] === 'saving';
+                        return (
+                          <tr key={r.studyId} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                            <td
+                              className="px-3 py-1.5 font-mono text-xs sticky left-0 bg-white dark:bg-zinc-950 text-blue-600 cursor-pointer hover:underline"
+                              onClick={() => window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank')}
+                            >{r.studyId}</td>
+                            {r.reviewers.map(rev => (
+                              <td key={rev.labelerCode} className="px-2 py-1.5 text-center">
+                                {rev.complete ? (
+                                  <span className="text-green-600 font-bold">✓</span>
+                                ) : (
+                                  <span className="text-zinc-300">—</span>
+                                )}
+                              </td>
+                            ))}
+                            <td className="px-3 py-1.5 text-center">
+                              {adminMode ? (
+                                <select
+                                  disabled={isSaving}
+                                  className="rounded border px-1.5 py-0.5 text-xs w-48 disabled:opacity-50"
+                                  defaultValue=""
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    if (val === '') return;
+                                    handleSetFinal(r.studyId, parseInt(val));
+                                    e.target.value = ''; // reset after submit
+                                  }}
+                                >
+                                  <option value="">— 選擇 —</option>
+                                  {ETIOLOGY_OPTIONS.map(o => (
+                                    <option key={o.code} value={o.code}>{o.label}</option>
+                                  ))}
+                                </select>
                               ) : (
-                                <span className="text-zinc-300">—</span>
+                                <span className="text-zinc-300 text-xs">—</span>
+                              )}
+                              {isSaving && (
+                                <span className="ml-1 text-xs text-zinc-400">儲存中...</span>
                               )}
                             </td>
-                          ))}
-                        </tr>
-                      ))}
+                          </tr>
+                        );
+                      })}
                       {pageRows.length === 0 && (
                         <tr>
-                          <td colSpan={1 + labelers.length} className="px-3 py-8 text-center text-zinc-400">
+                          <td colSpan={2 + labelers.length} className="px-3 py-8 text-center text-zinc-400">
                             {search ? '無符合的記錄' : '所有記錄皆已完成共識'}
                           </td>
                         </tr>
@@ -172,6 +313,51 @@ export default function EtiologyPage() {
           </>
         )}
       </div>
+
+      {/* Admin login modal */}
+      {showLoginModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={e => { if (e.target === e.currentTarget) { setShowLoginModal(false); setAuthError(''); setPassword(''); } }}
+        >
+          <div className="w-72 rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+            <h3 className="mb-4 flex items-center gap-2 text-base font-semibold">
+              <Lock className="h-4 w-4" />
+              管理員登入
+            </h3>
+            <div className="space-y-3">
+              <input
+                ref={passwordInputRef}
+                type="password"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="請輸入管理員密碼"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              />
+              {authError && <p className="text-xs text-red-500">{authError}</p>}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => { setShowLoginModal(false); setAuthError(''); setPassword(''); }}
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleLogin}
+                  disabled={authLoading || !password}
+                >
+                  {authLoading ? '登入中...' : '登入'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

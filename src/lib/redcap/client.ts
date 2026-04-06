@@ -187,6 +187,23 @@ export async function fetchEtiologyStatus(): Promise<Record<string, string>[]> {
   return parseCsv(text);
 }
 
+export async function importEtiologyFinal(studyId: string, code: number): Promise<void> {
+  const data = JSON.stringify([{ study_id: studyId, etiology_final: code.toString() }]);
+  const res = await redcapPost({
+    content: 'record',
+    action: 'import',
+    format: 'json',
+    type: 'flat',
+    overwriteBehavior: 'overwrite',
+    data,
+  });
+  const text = await res.text();
+  const count = parseInt(text);
+  if (isNaN(count) || count < 1) {
+    throw new Error(`REDCap import returned unexpected response: ${text}`);
+  }
+}
+
 export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[]> {
   const beginDate = new Date();
   beginDate.setMonth(beginDate.getMonth() - monthsBack);

@@ -1,0 +1,9 @@
+services:
+  ohca-dashboard:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - REDCAP_URL=${REDCAP_URL:-https://redcap.ntuh.gov.tw/api/}
+      - REDCAP_TOKEN=${REDCAP_TOKEN}
+    restart: unless-stopped

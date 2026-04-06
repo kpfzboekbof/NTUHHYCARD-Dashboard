@@ -1,65 +1,39 @@
-import Image from "next/image";
+import Link from 'next/link';
+import {
+  LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope,
+} from 'lucide-react';
 
-export default function Home() {
+const PAGES = [
+  { href: '/dashboard',    label: '總覽',       desc: '檢視整體完成率與各表單進度',     icon: LayoutDashboard, color: 'bg-blue-500' },
+  { href: '/heatmap',      label: '熱力圖',     desc: '以熱力圖呈現各記錄完成狀態',     icon: Grid3X3,         color: 'bg-emerald-500' },
+  { href: '/owners',       label: '負責人進度', desc: '各負責人的完成率與統計分析',       icon: Users,           color: 'bg-violet-500' },
+  { href: '/assign',       label: '管理者',     desc: '負責人指派、表單顯示設定與目標管理（需登入）', icon: Shield, color: 'bg-amber-500' },
+  { href: '/etiology',     label: 'Etiology',   desc: '追蹤病因共識審查進度與 final 完成狀態', icon: Stethoscope, color: 'bg-teal-500' },
+  { href: '/incomplete',   label: '未完成清單', desc: '列出所有未完成與未驗證的記錄',     icon: ListChecks,      color: 'bg-rose-500' },
+  { href: '/productivity', label: '鍵入進度',   desc: '追蹤各負責人的鍵入活動與時間軸',  icon: Keyboard,        color: 'bg-cyan-500' },
+];
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12">
+      <h1 className="mb-2 text-3xl font-bold">OHCA REDCap Dashboard</h1>
+      <p className="mb-10 text-zinc-500">選擇要查看的功能</p>
+
+      <div className="grid w-full max-w-3xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {PAGES.map(page => (
+          <Link
+            key={page.href}
+            href={page.href}
+            className="group flex flex-col rounded-xl border bg-white p-5 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 dark:bg-zinc-900 dark:border-zinc-800"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg text-white ${page.color}`}>
+              <page.icon className="h-5 w-5" />
+            </div>
+            <h2 className="text-base font-semibold group-hover:text-blue-600">{page.label}</h2>
+            <p className="mt-1 text-xs text-zinc-500">{page.desc}</p>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

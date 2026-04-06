@@ -34,7 +34,7 @@ export default function IncompletePage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'Incomplete' | 'Unverified'>('all');
   const [formFilter, setFormFilter] = useState(initialForm);
   const [targetOnly, setTargetOnly] = useState(false);
-  const [visited, setVisited] = useState<Set<string>>(new Set());
+  const [lastVisited, setLastVisited] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
@@ -143,7 +143,7 @@ export default function IncompletePage() {
                     <tbody>
                       {pageRows.map((r, i) => {
                         const rowKey = `${r.studyId}-${r.form}`;
-                        const isVisited = visited.has(rowKey);
+                        const isVisited = lastVisited === rowKey;
                         return (
                         <tr
                           key={`${rowKey}-${i}`}
@@ -153,7 +153,7 @@ export default function IncompletePage() {
                               : 'hover:bg-blue-50 dark:hover:bg-blue-950'
                           }`}
                           onClick={() => {
-                            setVisited(prev => new Set(prev).add(rowKey));
+                            setLastVisited(rowKey);
                             window.open(redcapRecordUrl(r.studyId, r.form), '_blank');
                           }}
                         >

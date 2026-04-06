@@ -21,5 +21,15 @@ export function useLoggingData(timeRange: Filters['timeRange'] = '3months') {
     { refreshInterval: 600000 } // 10 min
   );
 
-  return { data, error, isLoading, refresh: () => mutate() };
+  return {
+    data,
+    error,
+    isLoading,
+    refresh: async () => {
+      await mutate(
+        fetch(`/api/logging?months=${months}&noCache=1`).then(r => r.json()),
+        { revalidate: false }
+      );
+    },
+  };
 }

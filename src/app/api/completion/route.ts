@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getCached, setCached } from '@/lib/cache';
+import { NextRequest, NextResponse } from 'next/server';
+import { getCached, setCached, clearAllCache } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
@@ -8,9 +8,12 @@ import type { CompletionResponse, User } from '@/types';
 const CACHE_KEY = 'completion';
 const USERS_CACHE_KEY = 'redcap_users';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const cached = getCached<CompletionResponse>(CACHE_KEY);
+    const noCache = request.nextUrl.searchParams.get('noCache') === '1';
+    if (noCache) clearAllCache();
+
+    const cached = !noCache ? getCached<CompletionResponse>(CACHE_KEY) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }

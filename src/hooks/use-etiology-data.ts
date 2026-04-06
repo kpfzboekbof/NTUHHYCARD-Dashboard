@@ -15,8 +15,10 @@ export function useEtiologyData() {
     error,
     isLoading,
     refresh: async () => {
-      await fetch('/api/refresh', { method: 'POST' });
-      mutate();
+      await mutate(
+        fetch('/api/etiology?noCache=1').then(r => r.json()),
+        { revalidate: false }
+      );
     },
   };
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCached, setCached } from '@/lib/cache';
+import { getCached, setCached, clearAllCache } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
@@ -11,9 +11,12 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const months = parseInt(searchParams.get('months') || '3');
+    const noCache = searchParams.get('noCache') === '1';
     const cacheKey = `logging_${months}`;
 
-    const cached = getCached<LoggingResponse>(cacheKey);
+    if (noCache) clearAllCache();
+
+    const cached = !noCache ? getCached<LoggingResponse>(cacheKey) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }

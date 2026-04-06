@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getCached, setCached } from '@/lib/cache';
+import { NextRequest, NextResponse } from 'next/server';
+import { getCached, setCached, clearAllCache } from '@/lib/cache';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -7,9 +7,12 @@ import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
 const CACHE_KEY = 'etiology';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const cached = getCached<EtiologyResponse>(CACHE_KEY);
+    const noCache = request.nextUrl.searchParams.get('noCache') === '1';
+    if (noCache) clearAllCache();
+
+    const cached = !noCache ? getCached<EtiologyResponse>(CACHE_KEY) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }

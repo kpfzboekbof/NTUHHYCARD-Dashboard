@@ -14,27 +14,39 @@ interface StoreData {
 
 const KV_KEY = 'owner-store';
 
-/* ── Redis via @upstash/redis (Vercel production) ──────── */
+/* ── Redis (Vercel production) ─────────────────────────── */
 
 async function getRedisClient() {
-  const { Redis } = await import('@upstash/redis');
-  // Vercel Redis integration sets REDIS_URL automatically
-  return Redis.fromEnv();
+  const Redis = (await import('ioredis')).default;
+  const client = new Redis(process.env.REDIS_URL || '', {
+    maxRetriesPerRequest: 1,
+    lazyConnect: true,
+  });
+  await client.connect();
+  return client;
 }
 
 async function readRedis(): Promise<StoreData> {
+  let client;
   try {
-    const redis = await getRedisClient();
-    const data = await redis.get<StoreData>(KV_KEY);
-    return data ?? {};
+    client = await getRedisClient();
+    const raw = await client.get(KV_KEY);
+    return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
+  } finally {
+    client?.disconnect();
   }
 }
 
 async function writeRedis(data: StoreData): Promise<void> {
-  const redis = await getRedisClient();
-  await redis.set(KV_KEY, data);
+  let client;
+  try {
+    client = await getRedisClient();
+    await client.set(KV_KEY, JSON.stringify(data));
+  } finally {
+    client?.disconnect();
+  }
 }
 
 /* ── Local file (development) ───────────────────────────── */

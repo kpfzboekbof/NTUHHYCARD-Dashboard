@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCached, setCached, clearAllCache } from '@/lib/cache';
+import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const noCache = request.nextUrl.searchParams.get('noCache') === '1';
     if (noCache) clearAllCache();
 
-    const cached = !noCache ? getCached<CompletionResponse>(CACHE_KEY) : undefined;
+    const cached = !noCache ? await getCachedAsync<CompletionResponse>(CACHE_KEY) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Fetch users with cache
-    let users = getCached<User[]>(USERS_CACHE_KEY);
+    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
     if (!users) {
       const rawUsers = await fetchUsers();
       users = rawUsers.map(u => ({

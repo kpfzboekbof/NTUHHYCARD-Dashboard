@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCached, setCached, clearAllCache } from '@/lib/cache';
+import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
 
     if (noCache) clearAllCache();
 
-    const cached = !noCache ? getCached<LoggingResponse>(cacheKey) : undefined;
+    const cached = !noCache ? await getCachedAsync<LoggingResponse>(cacheKey) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
 
     const assignments = await getAssignments();
 
-    let users = getCached<User[]>(USERS_CACHE_KEY);
+    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
     if (!users) {
       const rawUsers = await fetchUsers();
       users = rawUsers.map(u => ({
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Need completion data for stats calculation
-    let completionRows = getCached<CompletionResponse>('completion')?.rows;
+    let completionRows = (await getCachedAsync<CompletionResponse>('completion'))?.rows;
     if (!completionRows) {
       const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
         fetchCompletionStatus(),

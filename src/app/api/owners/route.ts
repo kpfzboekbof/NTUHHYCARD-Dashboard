@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { getCached, setCached } from '@/lib/cache';
+import { getCachedAsync, setCached } from '@/lib/cache';
 import { fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
 import type { TargetIds } from '@/lib/owner-store';
@@ -9,7 +9,7 @@ import type { User, OwnerAssignments } from '@/types';
 const USERS_CACHE_KEY = 'redcap_users';
 
 async function getUsers(): Promise<User[]> {
-  const cached = getCached<User[]>(USERS_CACHE_KEY);
+  const cached = await getCachedAsync<User[]>(USERS_CACHE_KEY);
   if (cached) return cached;
 
   const raw = await fetchUsers();

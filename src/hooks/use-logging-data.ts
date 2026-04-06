@@ -5,7 +5,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 function timeRangeToMonths(range: Filters['timeRange']): number {
   switch (range) {
-    case 'week': return 1; // fetch 1 month minimum, filter client-side
+    case 'week': return 1;
     case 'month': return 1;
     case '3months': return 3;
     case '6months': return 6;
@@ -15,21 +15,19 @@ function timeRangeToMonths(range: Filters['timeRange']): number {
 
 export function useLoggingData(timeRange: Filters['timeRange'] = '3months') {
   const months = timeRangeToMonths(timeRange);
-  const { data, error, isLoading, mutate } = useSWR<LoggingResponse>(
+  const { data, error, isLoading, isValidating, mutate } = useSWR<LoggingResponse>(
     `/api/logging?months=${months}`,
     fetcher,
-    { refreshInterval: 600000 } // 10 min
+    { refreshInterval: 600000 }
   );
 
   return {
     data,
     error,
-    isLoading,
-    refresh: async () => {
-      await mutate(
-        fetch(`/api/logging?months=${months}&noCache=1`).then(r => r.json()),
-        { revalidate: false }
-      );
-    },
+    isLoading: isLoading || isValidating,
+    refresh: () => mutate(
+      fetcher(`/api/logging?months=${months}&noCache=1`),
+      { revalidate: false }
+    ),
   };
 }

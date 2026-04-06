@@ -4,7 +4,7 @@ import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export function useEtiologyData() {
-  const { data, error, isLoading, mutate } = useSWR<EtiologyResponse>(
+  const { data, error, isLoading, isValidating, mutate } = useSWR<EtiologyResponse>(
     '/api/etiology',
     fetcher,
     { refreshInterval: 300000 }
@@ -13,12 +13,10 @@ export function useEtiologyData() {
   return {
     data,
     error,
-    isLoading,
-    refresh: async () => {
-      await mutate(
-        fetch('/api/etiology?noCache=1').then(r => r.json()),
-        { revalidate: false }
-      );
-    },
+    isLoading: isLoading || isValidating,
+    refresh: () => mutate(
+      fetcher('/api/etiology?noCache=1'),
+      { revalidate: false }
+    ),
   };
 }

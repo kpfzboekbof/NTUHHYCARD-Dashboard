@@ -119,7 +119,10 @@ export default function EtiologyPage() {
                     <tbody>
                       {pageRows.map(r => (
                         <tr key={r.studyId} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800">
-                          <td className="px-3 py-1.5 font-mono text-xs sticky left-0 bg-white dark:bg-zinc-950">{r.studyId}</td>
+                          <td
+                            className="px-3 py-1.5 font-mono text-xs sticky left-0 bg-white dark:bg-zinc-950 text-blue-600 cursor-pointer hover:underline"
+                            onClick={() => window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_outcome`, '_blank')}
+                          >{r.studyId}</td>
                           {r.reviewers.map(rev => (
                             <td key={rev.labelerCode} className="px-2 py-1.5 text-center">
                               {rev.complete ? (

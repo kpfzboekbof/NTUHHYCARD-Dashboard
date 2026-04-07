@@ -96,16 +96,9 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
       }
     }
 
-    // B1: icu_ad_time < er_arrival_time
+    // B1: currently skipped — er_arrival is a category code, not a timestamp
+    // TODO: re-enable if a proper ER arrival timestamp field is identified
     const icuAdTime = parseTime(r.icu_ad_time);
-    const erArrivalTime = parseTime(r.er_arrival_time);
-    if (icuAdTime && erArrivalTime && icuAdTime < erArrivalTime) {
-      flags.push({
-        studyId, hospital, checkId: 'B1', category: 'chronology', severity: 'error',
-        message: `ICU 入院 ${fmt(icuAdTime)} 早於到院 ${fmt(erArrivalTime)}`,
-        redcapPage: 'ntuh_nhi_outcome',
-      });
-    }
 
     // B2: hosp_dis_time < icu_ad_time
     const hospDisTime = parseTime(r.hosp_dis_time);

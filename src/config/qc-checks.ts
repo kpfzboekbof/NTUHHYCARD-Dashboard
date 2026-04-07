@@ -10,7 +10,7 @@ export const QC_CHECK_META: QcCheckMeta[] = [
   { id: 'A1', category: 'logic',      severity: 'error',   label: '到院前 ROSC vs 結果矛盾',       description: '到院前已 ROSC，但結果記錄從未 ROSC' },
   { id: 'A2', category: 'logic',      severity: 'warning', label: 'DNR 與急救處置矛盾',             description: '初始 DNR 為是，但仍記錄電擊等急救處置' },
   { id: 'A3', category: 'logic',      severity: 'error',   label: 'ICU 依賴表單 vs sur_icu 矛盾',   description: '未入 ICU 但 Lab ICU / Postarrest Care 已填寫' },
-  { id: 'B1', category: 'chronology', severity: 'error',   label: 'ICU 入院時間早於到院時間',        description: 'icu_ad_time 早於 er_arrival 時間' },
+  // B1: 暫時停用 — er_arrival 只是類別碼，非時間戳。待確認到院時間欄位名稱後再啟用
   { id: 'B2', category: 'chronology', severity: 'error',   label: '出院時間早於 ICU 入院時間',       description: 'hosp_dis_time 早於 icu_ad_time' },
   { id: 'B3', category: 'chronology', severity: 'error',   label: 'WLST 時間異常',                  description: 'wlst_time 早於 ICU 入院或晚於出院' },
   { id: 'D1', category: 'outlier',    severity: 'warning', label: '急救時間極端值',                  description: 'duration 為 0 或超過 180 分鐘' },

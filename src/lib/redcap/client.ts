@@ -236,9 +236,9 @@ export async function importEtiologyFinal(studyId: string, code: number): Promis
 
 /** Fetch fields needed for QC record-level checks */
 export async function fetchQcRecords(): Promise<Record<string, string>[]> {
+  // Note: redcap_repeat_instrument is included automatically in CSV output
   const fields = [
     'study_id', 'hospital', 'exclusion',
-    'redcap_repeat_instrument',
     // A1
     'prehos_rosc_core', 'ever_rosc',
     // A2
@@ -246,7 +246,7 @@ export async function fetchQcRecords(): Promise<Record<string, string>[]> {
     // A3
     'sur_icu', 'ntuh_nhi_lab_icu_complete', 'ntuh_nhi_postarrest_care_complete',
     // B1, B2, B3
-    'er_arrival_time', 'icu_ad_time', 'hosp_dis_time', 'wlst_time',
+    'icu_ad_time', 'hosp_dis_time', 'wlst_time',
     // D1
     'duration',
     // D3

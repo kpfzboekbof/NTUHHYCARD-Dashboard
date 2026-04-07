@@ -45,7 +45,7 @@ export const REDCAP_FORM_NAMES = FORMS
   .filter(f => !VIRTUAL_FORMS.includes(f.name))
   .map(f => f.name);
 
-/** Core 助理: required fields in range 76-103 */
+/** Core 助理: required fields when er_arrival = 0 (到院前) */
 export const CORE_ASSISTANT_REQUIRED_FIELDS = [
   'place_core', 'witnessed_core',
   'bystander_core', 'pad_core',
@@ -54,6 +54,11 @@ export const CORE_ASSISTANT_REQUIRED_FIELDS = [
   'airway_core', // checkbox — at least one option checked
   'bosmin_core',
   'emt_core', 'emtp_core', 'prehos_rosc_core',
+];
+
+/** Core 助理: required fields when er_arrival != 0 (到院後) */
+export const CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER = [
+  'tohospital_core', 'prehos_rosc_core',
 ];
 
 /** Fields that are checkboxes (need special handling in CSV) */

@@ -1,4 +1,4 @@
-import { REDCAP_FORM_NAMES, CORE_ASSISTANT_REQUIRED_FIELDS, CORE_ASSISTANT_CHECKBOX_FIELDS, OUTCOME_ASSISTANT_REQUIRED_FIELDS } from '@/config/forms';
+import { REDCAP_FORM_NAMES, CORE_ASSISTANT_REQUIRED_FIELDS, CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER, CORE_ASSISTANT_CHECKBOX_FIELDS, OUTCOME_ASSISTANT_REQUIRED_FIELDS } from '@/config/forms';
 import type { RawCompletionRecord, RawLogEntry, RawUser } from './types';
 
 const REDCAP_URL = process.env.REDCAP_URL || 'https://redcap.ntuh.gov.tw/api/';
@@ -109,11 +109,16 @@ export async function fetchUsers(): Promise<RawUser[]> {
 
 /** Fetch Core assistant required fields and compute per-record completion */
 export async function fetchCoreAssistantStatus(): Promise<Map<string, boolean>> {
-  const fields = ['study_id', ...CORE_ASSISTANT_REQUIRED_FIELDS];
+  // Include er_arrival to determine which field set to check, plus all possible required fields
+  const allFields = new Set([
+    'study_id', 'er_arrival',
+    ...CORE_ASSISTANT_REQUIRED_FIELDS,
+    ...CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER,
+  ]);
   const res = await redcapPost({
     content: 'record',
     format: 'csv',
-    fields: fields.join(','),
+    fields: Array.from(allFields).join(','),
   });
   const text = await res.text();
   const rows = parseCsv(text);
@@ -125,10 +130,15 @@ export async function fetchCoreAssistantStatus(): Promise<Map<string, boolean>> 
     const id = row.study_id;
     if (!id) continue;
 
+    // Determine which fields to check based on er_arrival
+    const isErArrival = row.er_arrival === '0';
+    const requiredFields = isErArrival
+      ? CORE_ASSISTANT_REQUIRED_FIELDS   // er_arrival=0: full field set
+      : CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER; // er_arrival!=0: only tohospital_core + prehos_rosc_core
+
     let allFilled = true;
-    for (const field of CORE_ASSISTANT_REQUIRED_FIELDS) {
+    for (const field of requiredFields) {
       if (CORE_ASSISTANT_CHECKBOX_FIELDS.includes(field)) {
-        // Checkbox: at least one option must be checked (any column field___N = '1')
         const checkboxCols = Object.keys(row).filter(k => k.startsWith(`${field}___`));
         const anyChecked = checkboxCols.some(k => row[k] === '1');
         if (!anyChecked) { allFilled = false; break; }

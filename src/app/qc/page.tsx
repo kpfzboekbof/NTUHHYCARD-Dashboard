@@ -27,7 +27,7 @@ const CATEGORY_CONFIG = {
 const PAGE_SIZE = 50;
 
 export default function QcPage() {
-  const { data, isLoading, refresh } = useQcData();
+  const { data, error, isLoading, refresh } = useQcData();
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [activeCheck, setActiveCheck] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -36,7 +36,7 @@ export default function QcPage() {
 
   // Merge all flags into unified list
   const allFlags = useMemo(() => {
-    if (!data) return [];
+    if (!data || !data.recordFlags) return [];
 
     const recordItems = data.recordFlags.map(f => ({
       key: `${f.studyId}-${f.checkId}-${f.redcapPage}`,
@@ -50,7 +50,7 @@ export default function QcPage() {
       owner: null as string | null,
     }));
 
-    const behaviorItems = data.behaviorFlags.map((f, i) => ({
+    const behaviorItems = (data.behaviorFlags || []).map((f, i) => ({
       key: `behavior-${f.checkId}-${f.owner}-${i}`,
       studyId: null as string | null,
       hospital: null as string | null,
@@ -118,6 +118,11 @@ export default function QcPage() {
       <Header title="品質管制" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} />
 
       <div className="p-6 space-y-6">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+            <strong>載入失敗：</strong> {error.message || '未知錯誤'}
+          </div>
+        )}
         {/* Summary Cards */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {(Object.entries(CATEGORY_CONFIG) as [keyof typeof CATEGORY_CONFIG, typeof CATEGORY_CONFIG[keyof typeof CATEGORY_CONFIG]][]).map(([key, cfg]) => {

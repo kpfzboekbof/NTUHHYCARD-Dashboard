@@ -1,7 +1,14 @@
 import useSWR from 'swr';
-import type { QcResponse } from '@/app/api/qc/route';
+import type { QcResponse } from '@/types';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
+const fetcher = async (url: string): Promise<QcResponse> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(body || `HTTP ${res.status}`);
+  }
+  return res.json();
+};
 
 export function useQcData() {
   const { data, error, isLoading, isValidating, mutate } = useSWR<QcResponse>(

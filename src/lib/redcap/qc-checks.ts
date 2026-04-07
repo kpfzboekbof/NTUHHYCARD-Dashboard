@@ -1,8 +1,7 @@
 /**
- * Quality Control check definitions and logic.
+ * Quality Control check logic (server-side only).
  *
- * Each check receives raw REDCap record rows and returns flagged study IDs
- * with a description of the issue and the relevant REDCap form page.
+ * Metadata constants live in @/config/qc-checks for client-safe imports.
  */
 
 export interface QcFlag {
@@ -12,28 +11,8 @@ export interface QcFlag {
   category: 'logic' | 'chronology' | 'outlier' | 'behavior';
   severity: 'error' | 'warning';
   message: string;
-  /** REDCap form page name for the direct link */
   redcapPage: string;
 }
-
-export interface QcCheckMeta {
-  id: string;
-  category: 'logic' | 'chronology' | 'outlier' | 'behavior';
-  severity: 'error' | 'warning';
-  label: string;
-  description: string;
-}
-
-export const QC_CHECK_META: QcCheckMeta[] = [
-  { id: 'A1', category: 'logic',      severity: 'error',   label: '到院前 ROSC vs 結果矛盾',       description: '到院前已 ROSC，但結果記錄從未 ROSC' },
-  { id: 'A2', category: 'logic',      severity: 'warning', label: 'DNR 與急救處置矛盾',             description: '初始 DNR 為是，但仍記錄電擊等急救處置' },
-  { id: 'A3', category: 'logic',      severity: 'error',   label: 'ICU 依賴表單 vs sur_icu 矛盾',   description: '未入 ICU 但 Lab ICU / Postarrest Care 已填寫' },
-  { id: 'B1', category: 'chronology', severity: 'error',   label: 'ICU 入院時間早於到院時間',        description: 'icu_ad_time 早於 er_arrival 時間' },
-  { id: 'B2', category: 'chronology', severity: 'error',   label: '出院時間早於 ICU 入院時間',       description: 'hosp_dis_time 早於 icu_ad_time' },
-  { id: 'B3', category: 'chronology', severity: 'error',   label: 'WLST 時間異常',                  description: 'wlst_time 早於 ICU 入院或晚於出院' },
-  { id: 'D1', category: 'outlier',    severity: 'warning', label: '急救時間極端值',                  description: 'duration 為 0 或超過 180 分鐘' },
-  { id: 'D3', category: 'outlier',    severity: 'warning', label: 'EMS 送入但到院前措施全空',        description: 'EMS 送入、有目擊，但到院前急救措施全部為否/空' },
-];
 
 // ---- helpers ----
 
@@ -56,8 +35,6 @@ function parseTime(val: string | undefined): Date | null {
 export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
   const flags: QcFlag[] = [];
 
-  // Build a map of main rows (non-repeat) keyed by study_id
-  // Also track _complete fields from repeat rows
   const mainRows = new Map<string, Record<string, string>>();
   const labIcuCompleted = new Set<string>();
   const postarrestCompleted = new Set<string>();
@@ -66,15 +43,12 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
     const id = row.study_id;
     if (!id) continue;
 
-    // Skip excluded records
     if (isFilled(row.exclusion) && row.exclusion !== '0') continue;
 
     if (!row.redcap_repeat_instrument || row.redcap_repeat_instrument === '') {
-      // Main row
       mainRows.set(id, row);
     }
 
-    // Track if Lab ICU or Postarrest Care have been marked as started
     if (row.ntuh_nhi_lab_icu_complete && row.ntuh_nhi_lab_icu_complete !== '' && row.ntuh_nhi_lab_icu_complete !== '0') {
       labIcuCompleted.add(id);
     }
@@ -86,7 +60,7 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
   for (const [studyId, r] of mainRows) {
     const hospital = r.hospital || '0';
 
-    // A1: prehos_rosc_core = 1 (有) but ever_rosc = 0 (無)
+    // A1: prehos_rosc_core = 1 but ever_rosc = 0
     if (isYes(r.prehos_rosc_core) && isFilled(r.ever_rosc) && r.ever_rosc === '0') {
       flags.push({
         studyId, hospital, checkId: 'A1', category: 'logic', severity: 'error',
@@ -95,7 +69,7 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
       });
     }
 
-    // A2: ini_dnr = 1 AND defibrillation = 1 → contradicts DNR
+    // A2: ini_dnr = 1 AND defibrillation = 1
     if (isYes(r.ini_dnr) && isYes(r.defibrillation)) {
       flags.push({
         studyId, hospital, checkId: 'A2', category: 'logic', severity: 'warning',
@@ -182,7 +156,7 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
       }
     }
 
-    // D3: EMS-transported (emt_core=1 or emtp_core=1), witnessed, but all pre-hospital measures empty/no
+    // D3: EMS-transported, witnessed, but all pre-hospital measures empty/no
     const isEms = isYes(r.emt_core) || isYes(r.emtp_core);
     const isWitnessed = isYes(r.witnessed_core);
     if (isEms && isWitnessed) {
@@ -219,11 +193,6 @@ export interface BehaviorFlag {
   message: string;
 }
 
-export const BEHAVIOR_CHECK_META: QcCheckMeta[] = [
-  { id: 'E1', category: 'behavior', severity: 'warning', label: '短時間大量填寫',  description: '同一使用者在 10 分鐘內填寫超過 30 筆' },
-  { id: 'E2', category: 'behavior', severity: 'warning', label: '長期未登錄',       description: '負責人超過 14 天未有任何登錄活動' },
-];
-
 export interface LogRow {
   timestamp: string;
   username: string;
@@ -246,7 +215,6 @@ export function runBehaviorChecks(
 
   for (const [username, timestamps] of byUser) {
     timestamps.sort((a, b) => a.getTime() - b.getTime());
-    // Sliding 10-min window
     let windowStart = 0;
     for (let i = 0; i < timestamps.length; i++) {
       while (timestamps[i].getTime() - timestamps[windowStart].getTime() > 10 * 60 * 1000) {
@@ -262,7 +230,6 @@ export function runBehaviorChecks(
           owner: username,
           message: `10 分鐘內填寫 ${windowSize} 筆 (${windowTime} 起)`,
         });
-        // Skip ahead to avoid duplicate flags for same burst
         windowStart = i + 1;
         break;
       }

@@ -6,17 +6,10 @@ import { transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus } from '@/lib/redcap/client';
 import { transformCompletion } from '@/lib/redcap/transform';
 import { runRecordChecks, runBehaviorChecks } from '@/lib/redcap/qc-checks';
-import type { QcFlag, BehaviorFlag } from '@/lib/redcap/qc-checks';
-import type { CompletionResponse, User } from '@/types';
+import type { CompletionResponse, User, QcResponse } from '@/types';
 
 const CACHE_KEY = 'qc';
 const USERS_CACHE_KEY = 'redcap_users';
-
-export interface QcResponse {
-  recordFlags: QcFlag[];
-  behaviorFlags: BehaviorFlag[];
-  fetchedAt: string;
-}
 
 export async function GET(request: NextRequest) {
   try {

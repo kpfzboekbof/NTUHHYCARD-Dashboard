@@ -397,14 +397,14 @@ export default function EtiologyPage() {
                     </span>
                     <div className="flex gap-2">
                       <button
-                        className="rounded border px-3 py-1 disabled:opacity-40"
+                        className="rounded border px-3 py-1 transition-colors hover:bg-zinc-100 active:bg-zinc-200 disabled:opacity-40 disabled:hover:bg-transparent disabled:active:bg-transparent dark:hover:bg-zinc-800 dark:active:bg-zinc-700 dark:disabled:hover:bg-transparent dark:disabled:active:bg-transparent"
                         disabled={page === 0}
                         onClick={() => setPage(p => p - 1)}
                       >
                         上一頁
                       </button>
                       <button
-                        className="rounded border px-3 py-1 disabled:opacity-40"
+                        className="rounded border px-3 py-1 transition-colors hover:bg-zinc-100 active:bg-zinc-200 disabled:opacity-40 disabled:hover:bg-transparent disabled:active:bg-transparent dark:hover:bg-zinc-800 dark:active:bg-zinc-700 dark:disabled:hover:bg-transparent dark:disabled:active:bg-transparent"
                         disabled={page >= totalPages - 1}
                         onClick={() => setPage(p => p + 1)}
                       >

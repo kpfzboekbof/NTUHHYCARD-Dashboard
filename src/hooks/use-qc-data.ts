@@ -1,5 +1,5 @@
 import useSWR from 'swr';
-import type { QcResponse } from '@/app/api/qc/route';
+import type { QcResponse } from '@/types';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
 

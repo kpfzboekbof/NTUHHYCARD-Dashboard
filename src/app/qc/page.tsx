@@ -5,7 +5,7 @@ import { useQcData } from '@/hooks/use-qc-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity } from 'lucide-react';
-import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/lib/redcap/qc-checks';
+import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/config/qc-checks';
 import { HOSPITALS } from '@/config/hospitals';
 
 const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';

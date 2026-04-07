@@ -243,8 +243,6 @@ export async function fetchQcRecords(): Promise<Record<string, string>[]> {
     'prehos_rosc_core', 'ever_rosc',
     // A2
     'ini_dnr', 'defibrillation',
-    // A3
-    'sur_icu', 'ntuh_nhi_lab_icu_complete', 'ntuh_nhi_postarrest_care_complete',
     // B1, B2, B3
     'icu_ad_time', 'hosp_dis_time', 'wlst_time',
     // D1

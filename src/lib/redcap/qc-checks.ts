@@ -30,14 +30,12 @@ function parseTime(val: string | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// ---- per-record checks (A1-A3, B1-B3, D1, D3) ----
+// ---- per-record checks (A1-A2, B1-B3, D1, D3) ----
 
 export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
   const flags: QcFlag[] = [];
 
   const mainRows = new Map<string, Record<string, string>>();
-  const labIcuCompleted = new Set<string>();
-  const postarrestCompleted = new Set<string>();
 
   for (const row of rows) {
     const id = row.study_id;
@@ -47,13 +45,6 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
 
     if (!row.redcap_repeat_instrument || row.redcap_repeat_instrument === '') {
       mainRows.set(id, row);
-    }
-
-    if (row.ntuh_nhi_lab_icu_complete && row.ntuh_nhi_lab_icu_complete !== '' && row.ntuh_nhi_lab_icu_complete !== '0') {
-      labIcuCompleted.add(id);
-    }
-    if (row.ntuh_nhi_postarrest_care_complete && row.ntuh_nhi_postarrest_care_complete !== '' && row.ntuh_nhi_postarrest_care_complete !== '0') {
-      postarrestCompleted.add(id);
     }
   }
 
@@ -76,24 +67,6 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
         message: `初始 DNR=是, 但有電擊記錄`,
         redcapPage: 'ntuh_nhi_outcome',
       });
-    }
-
-    // A3: sur_icu != 1 but Lab ICU or Postarrest Care has data
-    if (r.sur_icu !== '1') {
-      if (labIcuCompleted.has(studyId)) {
-        flags.push({
-          studyId, hospital, checkId: 'A3', category: 'logic', severity: 'error',
-          message: `sur_icu≠1, 但 Lab ICU 表單有填寫`,
-          redcapPage: 'ntuh_nhi_lab_icu',
-        });
-      }
-      if (postarrestCompleted.has(studyId)) {
-        flags.push({
-          studyId, hospital, checkId: 'A3', category: 'logic', severity: 'error',
-          message: `sur_icu≠1, 但 Postarrest Care 表單有填寫`,
-          redcapPage: 'ntuh_nhi_postarrest_care',
-        });
-      }
     }
 
     // B1: currently skipped — er_arrival is a category code, not a timestamp

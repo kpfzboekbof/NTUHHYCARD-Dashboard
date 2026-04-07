@@ -58,7 +58,7 @@ export const CORE_ASSISTANT_REQUIRED_FIELDS = [
 
 /** Core 助理: required fields when er_arrival != 0 (到院後) */
 export const CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER = [
-  'tohospital_core', 'prehos_rosc_core',
+  'prehos_rosc_core',
 ];
 
 /** Fields that are checkboxes (need special handling in CSV) */

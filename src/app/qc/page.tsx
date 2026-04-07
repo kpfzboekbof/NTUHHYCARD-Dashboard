@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQcData } from '@/hooks/use-qc-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity } from 'lucide-react';
+import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity, Copy } from 'lucide-react';
 import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/config/qc-checks';
 import { HOSPITALS } from '@/config/hospitals';
 
@@ -18,10 +18,11 @@ function redcapRecordUrl(studyId: string, page: string): string {
 const ALL_CHECK_META = [...QC_CHECK_META, ...BEHAVIOR_CHECK_META];
 
 const CATEGORY_CONFIG = {
-  logic:      { label: '邏輯衝突',     icon: AlertCircle,   color: 'text-red-600',    bg: 'bg-red-50 dark:bg-red-950/30',       border: 'border-red-200 dark:border-red-900' },
-  chronology: { label: '時序異常',     icon: Clock,         color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/30',  border: 'border-orange-200 dark:border-orange-900' },
-  outlier:    { label: '異常值偵測',   icon: TrendingDown,  color: 'text-amber-600',  bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-900' },
-  behavior:   { label: '登錄行為品管', icon: Activity,      color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-950/30',     border: 'border-blue-200 dark:border-blue-900' },
+  consistency: { label: '重複欄位衝突', icon: Copy,          color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-950/30',  border: 'border-purple-200 dark:border-purple-900' },
+  logic:       { label: '邏輯衝突',     icon: AlertCircle,   color: 'text-red-600',    bg: 'bg-red-50 dark:bg-red-950/30',       border: 'border-red-200 dark:border-red-900' },
+  chronology:  { label: '時序異常',     icon: Clock,         color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/30',  border: 'border-orange-200 dark:border-orange-900' },
+  outlier:     { label: '異常值偵測',   icon: TrendingDown,  color: 'text-amber-600',  bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-900' },
+  behavior:    { label: '登錄行為品管', icon: Activity,      color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-950/30',     border: 'border-blue-200 dark:border-blue-900' },
 } as const;
 
 const PAGE_SIZE = 50;
@@ -67,7 +68,7 @@ export default function QcPage() {
 
   // Category counts for summary cards
   const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = { logic: 0, chronology: 0, outlier: 0, behavior: 0 };
+    const counts: Record<string, number> = { consistency: 0, logic: 0, chronology: 0, outlier: 0, behavior: 0 };
     for (const f of allFlags) {
       counts[f.category] = (counts[f.category] || 0) + 1;
     }

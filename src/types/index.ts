@@ -112,7 +112,7 @@ export interface QcRecordFlag {
   studyId: string;
   hospital: string;
   checkId: string;
-  category: 'logic' | 'chronology' | 'outlier' | 'behavior';
+  category: 'consistency' | 'logic' | 'chronology' | 'outlier' | 'behavior';
   severity: 'error' | 'warning';
   message: string;
   redcapPage: string;

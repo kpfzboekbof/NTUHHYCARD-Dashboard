@@ -234,6 +234,34 @@ export async function importEtiologyFinal(studyId: string, code: number): Promis
   }
 }
 
+/** Fetch fields needed for QC record-level checks */
+export async function fetchQcRecords(): Promise<Record<string, string>[]> {
+  const fields = [
+    'study_id', 'hospital', 'exclusion',
+    'redcap_repeat_instrument',
+    // A1
+    'prehos_rosc_core', 'ever_rosc',
+    // A2
+    'ini_dnr', 'defibrillation',
+    // A3
+    'sur_icu', 'ntuh_nhi_lab_icu_complete', 'ntuh_nhi_postarrest_care_complete',
+    // B1, B2, B3
+    'er_arrival_time', 'icu_ad_time', 'hosp_dis_time', 'wlst_time',
+    // D1
+    'duration',
+    // D3
+    'emt_core', 'emtp_core', 'witnessed_core',
+    'bystander_core', 'pad_core', 'manual_core', 'mcc_core', 'aed_core',
+  ];
+  const res = await redcapPost({
+    content: 'record',
+    format: 'csv',
+    fields: fields.join(','),
+  });
+  const text = await res.text();
+  return parseCsv(text);
+}
+
 export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[]> {
   const beginDate = new Date();
   beginDate.setMonth(beginDate.getMonth() - monthsBack);

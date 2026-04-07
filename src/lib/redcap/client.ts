@@ -239,15 +239,19 @@ export async function fetchQcRecords(): Promise<Record<string, string>[]> {
   // Note: redcap_repeat_instrument is included automatically in CSV output
   const fields = [
     'study_id', 'hospital', 'exclusion',
-    // A1
-    'prehos_rosc_core', 'ever_rosc',
-    // A2
-    'ini_dnr', 'defibrillation',
-    // B1, B2, B3
+    // A1-A2: 重複欄位衝突 (DNR)
+    'initial_dnr_core', 'ini_dnr', 'mid_dnr_core', 'mid_dnr',
+    // A3: any_rosc vs ever_rosc + prehos_rosc_core
+    'any_rosc', 'ever_rosc', 'prehos_rosc_core',
+    // A4: edoutcome_core vs sur_icu
+    'edoutcome_core', 'sur_icu',
+    // B2: ini_dnr + defibrillation (ini_dnr already above)
+    'defibrillation',
+    // C1, C2, C3
     'icu_ad_time', 'hosp_dis_time', 'wlst_time',
-    // D1
+    // E1
     'duration',
-    // D3
+    // E3
     'emt_core', 'emtp_core', 'witnessed_core',
     'bystander_core', 'pad_core', 'manual_core', 'mcc_core', 'aed_core',
   ];

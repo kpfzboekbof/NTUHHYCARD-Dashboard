@@ -187,6 +187,24 @@ export async function fetchOutcomeStatus(): Promise<{
   return { assistantStatus, etiologyFinalStatus };
 }
 
+/** Fetch study IDs where any reviewer marked cause_all_etiology_new = 1 (trauma) */
+export async function fetchTraumaEligibleIds(): Promise<Set<string>> {
+  const res = await redcapPost({
+    content: 'record',
+    format: 'csv',
+    fields: 'study_id,cause_all_etiology_new',
+  });
+  const text = await res.text();
+  const rows = parseCsv(text);
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.cause_all_etiology_new === '1' && row.study_id) {
+      ids.add(row.study_id);
+    }
+  }
+  return ids;
+}
+
 export async function fetchEtiologyStatus(): Promise<Record<string, string>[]> {
   const res = await redcapPost({
     content: 'record',

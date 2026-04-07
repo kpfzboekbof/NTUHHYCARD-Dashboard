@@ -29,6 +29,7 @@ export function transformCompletion(
   assignments: OwnerAssignments = {},
   users: User[] = [],
   virtualStatus?: VirtualFormStatus,
+  traumaIds?: Set<string>,
 ): CompletionRow[] {
   const rows: CompletionRow[] = [];
 
@@ -45,6 +46,11 @@ export function transformCompletion(
       const ICU_DEPENDENT_FORMS = ['ntuh_nhi_lab_icu', 'ntuh_nhi_postarrest_care'];
       if (ICU_DEPENDENT_FORMS.includes(form.name) && !surIcu) {
         continue; // skip — not applicable for this patient
+      }
+
+      // Trauma form only applies to records with cause_all_etiology_new = 1
+      if (form.name === 'h14trauma_ohca_transfusion' && traumaIds && !traumaIds.has(studyId)) {
+        continue; // skip — not a trauma case
       }
 
       let statusCode: CompletionStatus;

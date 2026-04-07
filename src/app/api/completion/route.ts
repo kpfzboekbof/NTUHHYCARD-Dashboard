@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers } from '@/lib/redcap/client';
+import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers, fetchTraumaEligibleIds } from '@/lib/redcap/client';
 import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
 import type { CompletionResponse, User } from '@/types';
@@ -34,16 +34,17 @@ export async function GET(request: NextRequest) {
       setCached(USERS_CACHE_KEY, users, 1800);
     }
 
-    const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
+    const [raw, coreAssistantStatus, outcomeStatus, traumaIds] = await Promise.all([
       fetchCompletionStatus(),
       fetchCoreAssistantStatus(),
       fetchOutcomeStatus(),
+      fetchTraumaEligibleIds(),
     ]);
     const rows = transformCompletion(raw, assignments, users, {
       coreAssistant: coreAssistantStatus,
       outcomeAssistant: outcomeStatus.assistantStatus,
       outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-    });
+    }, traumaIds);
     const visibleRows = rows.filter(r => !hiddenForms.includes(r.form));
     const byForm = calcFormStats(visibleRows);
     const byOwner = calcOwnerStats(visibleRows);

@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import fs from 'fs';
-import path from 'path';
+import { list, put } from '@vercel/blob';
 
-const DATA_DIR = process.env.SCREENING_DATA_DIR || path.join(process.cwd(), 'data', 'screening');
+const BLOB_PREFIX = 'screening/';
 
-/** Verify admin auth */
+/** Verify admin auth (cookie-based, for Dashboard UI) */
 async function isAuthenticated(): Promise<boolean> {
   const adminPw = process.env.ADMIN_PASSWORD || '';
   if (!adminPw) return false;
@@ -24,9 +23,7 @@ async function isAuthenticated(): Promise<boolean> {
 /**
  * GET /api/screening?month=2025-06
  *
- * 讀取指定月份的所有每日 JSON，合併回傳。
- * 只回傳 OHCA / Possible_OHCA / Prehospital_ROSC 的病人，
- * 以及已審核通過的 Possible_OHCA。
+ * 讀取指定月份的所有每日 JSON（從 Vercel Blob），合併回傳。
  */
 export async function GET(request: NextRequest) {
   if (!await isAuthenticated()) {
@@ -36,53 +33,54 @@ export async function GET(request: NextRequest) {
   const month = request.nextUrl.searchParams.get('month')
     || new Date().toISOString().slice(0, 7);
 
-  const monthDir = path.join(DATA_DIR, month);
-  const reviewPath = path.join(monthDir, '_reviews.json');
+  // 列出此月份的所有 blob
+  const prefix = `${BLOB_PREFIX}${month}/`;
+  const { blobs } = await list({ prefix });
 
-  // 讀取審核決定
+  // 讀取審核紀錄
   let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
-  if (fs.existsSync(reviewPath)) {
-    reviews = JSON.parse(fs.readFileSync(reviewPath, 'utf-8'));
+  const reviewBlob = blobs.find(b => b.pathname.endsWith('/_reviews.json'));
+  if (reviewBlob) {
+    const res = await fetch(reviewBlob.url);
+    reviews = await res.json();
   }
 
-  // 讀取所有每日 JSON
+  // 讀取每日 JSON
   const allPatients: Record<string, unknown>[] = [];
   const dates: string[] = [];
 
-  if (fs.existsSync(monthDir)) {
-    const files = fs.readdirSync(monthDir)
-      .filter(f => f.endsWith('.json') && !f.startsWith('_'))
-      .sort();
+  const dayBlobs = blobs
+    .filter(b => b.pathname.endsWith('.json') && !b.pathname.endsWith('_reviews.json'))
+    .sort((a, b) => a.pathname.localeCompare(b.pathname));
 
-    for (const file of files) {
-      const dateStr = file.replace('.json', '');
-      dates.push(dateStr);
+  for (const blob of dayBlobs) {
+    const filename = blob.pathname.split('/').pop() || '';
+    const dateStr = filename.replace('.json', '');
+    dates.push(dateStr);
 
-      const content = JSON.parse(
-        fs.readFileSync(path.join(monthDir, file), 'utf-8')
-      );
+    const res = await fetch(blob.url);
+    const content = await res.json();
 
-      for (const patient of content.patients || []) {
-        // 合併審核狀態
-        const review = reviews[patient.id];
-        if (review) {
-          patient.reviewed = review.decision;
-          patient.reviewedAt = review.reviewedAt;
-        }
-        allPatients.push(patient);
+    for (const patient of content.patients || []) {
+      const review = reviews[patient.id];
+      if (review) {
+        patient.reviewed = review.decision;
+        patient.reviewedAt = review.reviewedAt;
       }
+      allPatients.push(patient);
     }
   }
 
-  // 計算可用月份列表
-  const availableMonths: string[] = [];
-  if (fs.existsSync(DATA_DIR)) {
-    const dirs = fs.readdirSync(DATA_DIR)
-      .filter(d => /^\d{4}-\d{2}$/.test(d))
-      .sort()
-      .reverse();
-    availableMonths.push(...dirs);
+  // 計算可用月份
+  const allBlobs = await list({ prefix: BLOB_PREFIX });
+  const monthSet = new Set<string>();
+  for (const b of allBlobs.blobs) {
+    const parts = b.pathname.replace(BLOB_PREFIX, '').split('/');
+    if (parts[0] && /^\d{4}-\d{2}$/.test(parts[0])) {
+      monthSet.add(parts[0]);
+    }
   }
+  const availableMonths = [...monthSet].sort().reverse();
 
   return NextResponse.json({
     month,

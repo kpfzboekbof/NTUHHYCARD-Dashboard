@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Lock, LogOut, Play, Loader2, Check, X, AlertTriangle, Heart } from 'lucide-react';
+import { Lock, LogOut, Loader2, Check, X, AlertTriangle, Heart } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,13 +13,13 @@ import type { ScreeningPatient } from '@/types';
 /* ------------------------------------------------------------------ */
 function maskName(name: string): string {
   if (!name) return '';
-  const chars = [...name]; // 正確處理 Unicode
+  const chars = [...name];
   if (chars.length <= 1) return name;
   return chars[0] + 'O' + chars.slice(2).join('');
 }
 
 /* ------------------------------------------------------------------ */
-/* 分類顏色                                                            */
+/* 分類顏色與標籤                                                      */
 /* ------------------------------------------------------------------ */
 function classColor(cls: string) {
   switch (cls) {
@@ -57,29 +57,8 @@ export default function ScreeningPage() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // Scraper run state
-  const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState<string | null>(null);
-
   // Data
   const { data, error, isLoading, refresh } = useScreeningData(month);
-
-  // Auto-run: 每日 09:00 自動觸發
-  useEffect(() => {
-    if (!authenticated) return;
-
-    const checkAutoRun = () => {
-      const now = new Date();
-      if (now.getHours() === 9 && now.getMinutes() === 0) {
-        handleRunScraper();
-      }
-    };
-
-    // 每分鐘檢查一次
-    const interval = setInterval(checkAutoRun, 60000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated]);
 
   // Check auth on mount
   useEffect(() => {
@@ -105,30 +84,6 @@ export default function ScreeningPage() {
     await fetch('/api/auth', { method: 'DELETE' });
     setAuthenticated(false);
   }, []);
-
-  const handleRunScraper = useCallback(async () => {
-    setRunning(true);
-    setRunResult(null);
-    try {
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '/');
-      const res = await fetch('/api/screening/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: today }),
-      });
-      const d = await res.json();
-      if (d.ok) {
-        setRunResult('掃描完成');
-        refresh();
-      } else {
-        setRunResult(`掃描失敗: ${d.error?.slice(0, 100) || '未知錯誤'}`);
-      }
-    } catch (e) {
-      setRunResult(`錯誤: ${e instanceof Error ? e.message : '未知'}`);
-    } finally {
-      setRunning(false);
-    }
-  }, [refresh]);
 
   const handleReview = useCallback(async (patientId: string, decision: 'confirmed' | 'excluded') => {
     await fetch('/api/screening/review', {
@@ -222,7 +177,7 @@ export default function ScreeningPage() {
       <Header title="OHCA 病人擷取" />
       <div className="p-6 space-y-6">
 
-        {/* Top bar: logout + month picker + run button */}
+        {/* Top bar */}
         <div className="flex flex-wrap items-center gap-3">
           <select
             className="rounded border px-3 py-1.5 text-sm"
@@ -234,16 +189,9 @@ export default function ScreeningPage() {
             ))}
           </select>
 
-          <Button variant="outline" size="sm" onClick={handleRunScraper} disabled={running}>
-            {running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1 h-3.5 w-3.5" />}
-            {running ? '掃描中...' : '立即掃描今日'}
-          </Button>
-
-          {runResult && (
-            <span className={`text-xs ${runResult.startsWith('掃描完成') ? 'text-green-600' : 'text-red-500'}`}>
-              {runResult}
-            </span>
-          )}
+          <p className="text-xs text-zinc-400">
+            院內電腦每日 09:00 自動掃描上傳
+          </p>
 
           <div className="ml-auto flex items-center gap-3">
             {data?.fetchedAt && (
@@ -251,17 +199,15 @@ export default function ScreeningPage() {
                 更新: {new Date(data.fetchedAt).toLocaleString('zh-TW')}
               </span>
             )}
+            <Button variant="outline" size="sm" onClick={() => refresh()}>
+              重新整理
+            </Button>
             <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="mr-1 h-3.5 w-3.5" />
               登出
             </Button>
           </div>
         </div>
-
-        {/* Auto-run hint */}
-        <p className="text-xs text-zinc-400">
-          此頁面每日 09:00 自動執行掃描（需保持頁面開啟）
-        </p>
 
         {/* Error / Loading */}
         {error && (
@@ -363,7 +309,6 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
 
   return (
     <div className="px-4 py-3">
-      {/* Main row */}
       <div
         className="flex items-start gap-2 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
@@ -385,7 +330,6 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
             {classLabel(patient.ohcaClass)}
           </span>
 
-          {/* 審核狀態標籤 */}
           {isPossible && isConfirmed && (
             <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
               <Check className="h-3 w-3" /> 已確認
@@ -399,7 +343,6 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
         </div>
       </div>
 
-      {/* Expanded details */}
       {expanded && (
         <div className="mt-3 space-y-2 rounded border bg-zinc-50 p-3 text-xs dark:bg-zinc-900">
           <div><strong>主診斷:</strong> {patient.diagnosis || 'N/A'}</div>
@@ -417,7 +360,6 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
             </div>
           )}
 
-          {/* Possible OHCA 審核按鈕 */}
           {isPossible && !isReviewed && (
             <div className="flex items-center gap-2 pt-2 border-t">
               <AlertTriangle className="h-4 w-4 text-yellow-500" />

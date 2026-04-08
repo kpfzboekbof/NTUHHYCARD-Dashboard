@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import fs from 'fs';
-import path from 'path';
+import { list, put } from '@vercel/blob';
 
-const DATA_DIR = process.env.SCREENING_DATA_DIR || path.join(process.cwd(), 'data', 'screening');
+const BLOB_PREFIX = 'screening/';
 
 /** Verify admin auth */
 async function isAuthenticated(): Promise<boolean> {
@@ -43,26 +42,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '決定只能是 confirmed 或 excluded' }, { status: 400 });
   }
 
-  const monthDir = path.join(DATA_DIR, month);
-  if (!fs.existsSync(monthDir)) {
-    return NextResponse.json({ error: '找不到此月份資料' }, { status: 404 });
-  }
-
-  const reviewPath = path.join(monthDir, '_reviews.json');
+  const reviewPath = `${BLOB_PREFIX}${month}/_reviews.json`;
 
   // 讀取現有審核紀錄
   let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
-  if (fs.existsSync(reviewPath)) {
-    reviews = JSON.parse(fs.readFileSync(reviewPath, 'utf-8'));
+  try {
+    const { blobs } = await list({ prefix: reviewPath });
+    if (blobs.length > 0) {
+      const res = await fetch(blobs[0].url);
+      reviews = await res.json();
+    }
+  } catch {
+    // 不存在就用空物件
   }
 
-  // 更新或新增
+  // 更新
   reviews[id] = {
     decision,
     reviewedAt: new Date().toISOString(),
   };
 
-  fs.writeFileSync(reviewPath, JSON.stringify(reviews, null, 2), 'utf-8');
+  await put(reviewPath, JSON.stringify(reviews, null, 2), {
+    access: 'public',
+    contentType: 'application/json',
+    addRandomSuffix: false,
+  });
 
   return NextResponse.json({ ok: true, id, decision });
 }

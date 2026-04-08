@@ -234,6 +234,29 @@ export async function importEtiologyFinal(studyId: string, code: number): Promis
   }
 }
 
+/** Batch import field values into REDCap. Returns the number of records updated. */
+export async function batchImportField(
+  records: Array<{ study_id: string; [field: string]: string }>,
+): Promise<number> {
+  if (records.length === 0) return 0;
+  const data = JSON.stringify(records);
+  const res = await redcapPost({
+    content: 'record',
+    action: 'import',
+    format: 'json',
+    type: 'flat',
+    overwriteBehavior: 'overwrite',
+    data,
+  });
+  const text = await res.text();
+  const match = text.match(/(\d+)/);
+  const count = match ? parseInt(match[1]) : 0;
+  if (count < 1) {
+    throw new Error(`REDCap batch import returned unexpected response: ${text}`);
+  }
+  return count;
+}
+
 /** Fetch fields needed for QC record-level checks */
 export async function fetchQcRecords(): Promise<Record<string, string>[]> {
   // Note: redcap_repeat_instrument is included automatically in CSV output

@@ -6,4 +6,6 @@ services:
     environment:
       - REDCAP_URL=${REDCAP_URL:-https://redcap.ntuh.gov.tw/api/}
       - REDCAP_TOKEN=${REDCAP_TOKEN}
+      - GMAIL_USER=${GMAIL_USER}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
     restart: unless-stopped

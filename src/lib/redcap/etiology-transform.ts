@@ -1,6 +1,7 @@
 export interface Labeler {
   code: number;
   name: string;
+  email?: string;
 }
 
 export const ETIOLOGY_FINAL_MAP: Record<number, string> = {

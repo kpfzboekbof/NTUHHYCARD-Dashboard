@@ -14,7 +14,7 @@ const fetcher = (url: string) => fetch(url).then(r => r.json());
 
 export default function AssignPage() {
   const { data: compData, refresh } = useCompletionData();
-  const { data: ownerData, mutate: mutateOwners } = useSWR<{ users: User[]; assignments: OwnerAssignments; hiddenForms: string[]; targetIds: { basic: number | null; exam: number | null }; labelers: { code: number; name: string }[] }>(
+  const { data: ownerData, mutate: mutateOwners } = useSWR<{ users: User[]; assignments: OwnerAssignments; hiddenForms: string[]; targetIds: { basic: number | null; exam: number | null }; labelers: { code: number; name: string; email?: string }[] }>(
     '/api/owners', fetcher
   );
 
@@ -61,7 +61,7 @@ export default function AssignPage() {
   const [draftHidden, setDraftHidden] = useState<Set<string>>(new Set());
   const [draftTargetBasic, setDraftTargetBasic] = useState<string>('');
   const [draftTargetExam, setDraftTargetExam] = useState<string>('');
-  const [draftLabelers, setDraftLabelers] = useState<{ code: string; name: string }[]>([]);
+  const [draftLabelers, setDraftLabelers] = useState<{ code: string; name: string; email: string }[]>([]);
   const [saving, setSaving] = useState(false);
 
   const startEdit = useCallback(() => {
@@ -69,7 +69,7 @@ export default function AssignPage() {
     setDraftHidden(new Set(ownerData?.hiddenForms ?? []));
     setDraftTargetBasic(ownerData?.targetIds?.basic?.toString() ?? '');
     setDraftTargetExam(ownerData?.targetIds?.exam?.toString() ?? '');
-    setDraftLabelers((ownerData?.labelers ?? []).map(l => ({ code: l.code.toString(), name: l.name })));
+    setDraftLabelers((ownerData?.labelers ?? []).map(l => ({ code: l.code.toString(), name: l.name, email: l.email || '' })));
     setEditing(true);
   }, [ownerData]);
 
@@ -101,7 +101,7 @@ export default function AssignPage() {
           },
           labelers: draftLabelers
             .filter(l => l.code && l.name)
-            .map(l => ({ code: parseInt(l.code), name: l.name })),
+            .map(l => ({ code: parseInt(l.code), name: l.name, ...(l.email ? { email: l.email } : {}) })),
         }),
       });
       if (!res.ok) {
@@ -308,12 +308,23 @@ export default function AssignPage() {
                     />
                     <input
                       type="text"
-                      className="w-40 rounded border px-2 py-1 text-sm"
+                      className="w-32 rounded border px-2 py-1 text-sm"
                       placeholder="姓名"
                       value={l.name}
                       onChange={e => {
                         const next = [...draftLabelers];
                         next[i] = { ...next[i], name: e.target.value };
+                        setDraftLabelers(next);
+                      }}
+                    />
+                    <input
+                      type="email"
+                      className="w-52 rounded border px-2 py-1 text-sm"
+                      placeholder="Email"
+                      value={l.email}
+                      onChange={e => {
+                        const next = [...draftLabelers];
+                        next[i] = { ...next[i], email: e.target.value };
                         setDraftLabelers(next);
                       }}
                     />
@@ -327,7 +338,7 @@ export default function AssignPage() {
                 ))}
                 <button
                   className="text-sm text-blue-600 hover:underline"
-                  onClick={() => setDraftLabelers(prev => [...prev, { code: '', name: '' }])}
+                  onClick={() => setDraftLabelers(prev => [...prev, { code: '', name: '', email: '' }])}
                 >
                   + 新增標記者
                 </button>
@@ -337,6 +348,11 @@ export default function AssignPage() {
                 {(ownerData?.labelers ?? []).map(l => (
                   <span key={l.code} className="rounded bg-zinc-100 px-3 py-1 text-sm dark:bg-zinc-800">
                     {l.name} (code: {l.code})
+                    {l.email && (
+                      <span className="ml-1 text-zinc-500">
+                        &lt;{l.email}&gt;
+                      </span>
+                    )}
                   </span>
                 ))}
                 {(ownerData?.labelers ?? []).length === 0 && (

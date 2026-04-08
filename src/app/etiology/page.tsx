@@ -5,7 +5,7 @@ import { useEtiologyData } from '@/hooks/use-etiology-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Lock, Unlock } from 'lucide-react';
+import { Lock, Unlock, Mail, Calendar, AlertTriangle } from 'lucide-react';
 import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
 import type { ConsensusStatus } from '@/lib/redcap/etiology-transform';
 
@@ -49,12 +49,44 @@ export default function EtiologyPage() {
   // Per-row save state: studyId → 'saving' | 'error'
   const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
 
+  // Reminder state
+  const [meetingDate, setMeetingDate] = useState('');
+  const [reminderSentAt, setReminderSentAt] = useState<string | null>(null);
+  const [reminderStatus, setReminderStatus] = useState<Array<{
+    code: number; name: string; email: string | null; incompleteCount: number;
+  }>>([]);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [sendResult, setSendResult] = useState<Array<{
+    name: string; email: string; count: number; success: boolean; error?: string;
+  }> | null>(null);
+
   // Check admin auth on mount
   useEffect(() => {
     fetch('/api/auth').then(r => r.json()).then(d => {
       if (d.authenticated) setAdminMode(true);
     });
   }, []);
+
+  // Fetch reminder status when admin mode is active
+  const fetchReminderStatus = useCallback(async () => {
+    setReminderLoading(true);
+    try {
+      const res = await fetch('/api/etiology-reminder');
+      const d = await res.json();
+      if (res.ok) {
+        setMeetingDate(d.meetingDate || '');
+        setReminderSentAt(d.reminderSentAt || null);
+        setReminderStatus(d.labelerStatus || []);
+      }
+    } finally {
+      setReminderLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminMode) fetchReminderStatus();
+  }, [adminMode, fetchReminderStatus]);
 
   useEffect(() => {
     if (showLoginModal) {
@@ -88,6 +120,38 @@ export default function EtiologyPage() {
     await fetch('/api/auth', { method: 'DELETE' });
     setAdminMode(false);
     setViewMode('tracking');
+  }, []);
+
+  const handleSaveMeetingDate = useCallback(async (date: string) => {
+    setMeetingDate(date);
+    await fetch('/api/etiology-reminder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'setMeetingDate', meetingDate: date || null }),
+    });
+  }, []);
+
+  const handleSendReminder = useCallback(async () => {
+    setSendingReminder(true);
+    setSendResult(null);
+    try {
+      const res = await fetch('/api/etiology-reminder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sendReminder' }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setSendResult(d.results);
+        setReminderSentAt(d.sentAt);
+      } else {
+        alert(d.error || '發送失敗');
+      }
+    } catch {
+      alert('網路錯誤，請稍後再試');
+    } finally {
+      setSendingReminder(false);
+    }
   }, []);
 
   // Write etiology_final for a record
@@ -170,6 +234,118 @@ export default function EtiologyPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Reminder card (admin only) */}
+            {adminMode && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Mail className="h-4 w-4" />
+                    共識會議提醒
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Meeting date setting */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <Calendar className="h-4 w-4 text-zinc-500" />
+                      共識會議日期
+                    </label>
+                    <input
+                      type="date"
+                      className="rounded border px-3 py-1.5 text-sm"
+                      value={meetingDate}
+                      onChange={e => handleSaveMeetingDate(e.target.value)}
+                    />
+                    {meetingDate && (() => {
+                      const diff = Math.ceil((new Date(meetingDate).getTime() - Date.now()) / 86400000);
+                      if (diff <= 10 && diff >= 0) {
+                        return (
+                          <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            <AlertTriangle className="h-3 w-3" />
+                            距會議 {diff} 天
+                          </span>
+                        );
+                      }
+                      if (diff > 10) {
+                        return <span className="text-xs text-zinc-500">距會議 {diff} 天</span>;
+                      }
+                      return <span className="text-xs text-red-500">會議已過</span>;
+                    })()}
+                  </div>
+
+                  {/* Labeler incomplete summary */}
+                  {!reminderLoading && reminderStatus.length > 0 && (
+                    <div className="overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-zinc-500">
+                            <th className="px-3 py-2">Labeler</th>
+                            <th className="px-3 py-2">Email</th>
+                            <th className="px-3 py-2 text-center">未完成數</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reminderStatus.map(l => (
+                            <tr key={l.code} className="border-b">
+                              <td className="px-3 py-1.5">{l.name}</td>
+                              <td className="px-3 py-1.5 text-zinc-500">
+                                {l.email || <span className="text-red-400">未設定</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-center">
+                                {l.incompleteCount > 0 ? (
+                                  <span className="font-medium text-amber-600">{l.incompleteCount}</span>
+                                ) : (
+                                  <span className="text-green-600">0</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Send button + status */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      onClick={handleSendReminder}
+                      disabled={sendingReminder || !meetingDate || reminderStatus.every(l => !l.email)}
+                      size="sm"
+                    >
+                      <Mail className="mr-1.5 h-3.5 w-3.5" />
+                      {sendingReminder ? '發送中...' : '發送提醒 Email'}
+                    </Button>
+                    {reminderSentAt && (
+                      <span className="text-xs text-zinc-500">
+                        上次發送：{new Date(reminderSentAt).toLocaleString('zh-TW')}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Send results */}
+                  {sendResult && (
+                    <div className="rounded border p-3 text-sm space-y-1">
+                      <p className="font-medium">發送結果：</p>
+                      {sendResult.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span>{r.name}</span>
+                          <span className="text-zinc-400">→</span>
+                          <span className="text-zinc-500">{r.email}</span>
+                          {r.count === 0 ? (
+                            <span className="text-xs text-green-600">已全部完成，略過</span>
+                          ) : r.success ? (
+                            <span className="text-xs text-green-600">已發送（{r.count} 筆）</span>
+                          ) : (
+                            <span className="text-xs text-red-500">失敗：{r.error}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Records table */}
             <Card>

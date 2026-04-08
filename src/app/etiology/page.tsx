@@ -58,10 +58,10 @@ export default function EtiologyPage() {
     code: number; name: string; email: string | null; incompleteCount: number;
   }>>([]);
   const [reminderLoading, setReminderLoading] = useState(false);
-  const [sendingReminder, setSendingReminder] = useState(false);
-  const [sendResult, setSendResult] = useState<Array<{
-    name: string; email: string; count: number; success: boolean; error?: string;
-  }> | null>(null);
+  const [sendingReminder, setSendingReminder] = useState<number | 'all' | false>(false);
+  const [sendResult, setSendResult] = useState<Record<number, {
+    success: boolean; count: number; error?: string;
+  }>>({});
 
   // Check admin auth on mount
   useEffect(() => {
@@ -147,18 +147,27 @@ export default function EtiologyPage() {
     fetchReminderStatus();
   }, [meetingDate, reminderIdFrom, reminderIdTo, fetchReminderStatus]);
 
-  const handleSendReminder = useCallback(async () => {
-    setSendingReminder(true);
-    setSendResult(null);
+  const handleSendReminder = useCallback(async (target: number | 'all') => {
+    setSendingReminder(target);
     try {
+      // "all" excludes 陳雲昶 by default
+      const labelerCodes = target === 'all'
+        ? reminderStatus.filter(l => l.name !== '陳雲昶' && l.email && l.incompleteCount > 0).map(l => l.code)
+        : [target];
+
       const res = await fetch('/api/etiology-reminder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sendReminder' }),
+        body: JSON.stringify({ action: 'sendReminder', labelerCodes }),
       });
       const d = await res.json();
       if (res.ok) {
-        setSendResult(d.results);
+        const resultMap: Record<number, { success: boolean; count: number; error?: string }> = { ...sendResult };
+        for (const r of d.results) {
+          const labeler = reminderStatus.find(l => l.email === r.email);
+          if (labeler) resultMap[labeler.code] = { success: r.success, count: r.count, error: r.error };
+        }
+        setSendResult(resultMap);
         setReminderSentAt(d.sentAt);
       } else {
         alert(d.error || '發送失敗');
@@ -168,7 +177,7 @@ export default function EtiologyPage() {
     } finally {
       setSendingReminder(false);
     }
-  }, []);
+  }, [reminderStatus, sendResult]);
 
   // Write etiology_final for a record
   const handleSetFinal = useCallback(async (studyId: string, code: number) => {
@@ -317,47 +326,68 @@ export default function EtiologyPage() {
                     )}
                   </div>
 
-                  {/* Labeler incomplete summary */}
+                  {/* Labeler incomplete summary with individual send buttons */}
                   {!reminderLoading && reminderStatus.length > 0 && (
                     <div className="overflow-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b text-left text-zinc-500">
                             <th className="px-3 py-2">Labeler</th>
-                            <th className="px-3 py-2">Email</th>
                             <th className="px-3 py-2 text-center">未完成數</th>
+                            <th className="px-3 py-2 text-center">發送提醒</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {reminderStatus.map(l => (
-                            <tr key={l.code} className="border-b">
-                              <td className="px-3 py-1.5">{l.name}</td>
-                              <td className="px-3 py-1.5 text-zinc-500">
-                                {l.email || <span className="text-red-400">未設定</span>}
-                              </td>
-                              <td className="px-3 py-1.5 text-center">
-                                {l.incompleteCount > 0 ? (
-                                  <span className="font-medium text-amber-600">{l.incompleteCount}</span>
-                                ) : (
-                                  <span className="text-green-600">0</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                          {reminderStatus.map(l => {
+                            const result = sendResult[l.code];
+                            const isSending = sendingReminder === l.code || sendingReminder === 'all';
+                            const canSend = !!l.email && l.incompleteCount > 0 && !!meetingDate;
+                            return (
+                              <tr key={l.code} className="border-b">
+                                <td className="px-3 py-1.5">{l.name}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {l.incompleteCount > 0 ? (
+                                    <span className="font-medium text-amber-600">{l.incompleteCount}</span>
+                                  ) : (
+                                    <span className="text-green-600">0</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {result ? (
+                                    result.success ? (
+                                      <span className="text-xs text-green-600">已發送（{result.count} 筆）</span>
+                                    ) : (
+                                      <span className="text-xs text-red-500">失敗：{result.error}</span>
+                                    )
+                                  ) : !l.email ? (
+                                    <span className="text-xs text-zinc-400">未設定 Email</span>
+                                  ) : (
+                                    <button
+                                      className="rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100 disabled:opacity-40 dark:bg-blue-900/30 dark:text-blue-400"
+                                      disabled={!canSend || !!sendingReminder}
+                                      onClick={() => handleSendReminder(l.code)}
+                                    >
+                                      {isSending ? '發送中...' : '發送'}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   )}
 
-                  {/* Send button + status */}
+                  {/* Send all + status */}
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
-                      onClick={handleSendReminder}
-                      disabled={sendingReminder || !meetingDate || reminderStatus.every(l => !l.email)}
+                      onClick={() => handleSendReminder('all')}
+                      disabled={!!sendingReminder || !meetingDate || reminderStatus.every(l => !l.email || l.incompleteCount === 0)}
                       size="sm"
                     >
                       <Mail className="mr-1.5 h-3.5 w-3.5" />
-                      {sendingReminder ? '發送中...' : '發送提醒 Email'}
+                      {sendingReminder === 'all' ? '發送中...' : '群發提醒（不含陳雲昶）'}
                     </Button>
                     {reminderSentAt && (
                       <span className="text-xs text-zinc-500">
@@ -365,27 +395,6 @@ export default function EtiologyPage() {
                       </span>
                     )}
                   </div>
-
-                  {/* Send results */}
-                  {sendResult && (
-                    <div className="rounded border p-3 text-sm space-y-1">
-                      <p className="font-medium">發送結果：</p>
-                      {sendResult.map((r, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span>{r.name}</span>
-                          <span className="text-zinc-400">→</span>
-                          <span className="text-zinc-500">{r.email}</span>
-                          {r.count === 0 ? (
-                            <span className="text-xs text-green-600">已全部完成，略過</span>
-                          ) : r.success ? (
-                            <span className="text-xs text-green-600">已發送（{r.count} 筆）</span>
-                          ) : (
-                            <span className="text-xs text-red-500">失敗：{r.error}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             )}

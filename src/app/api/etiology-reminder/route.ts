@@ -126,10 +126,14 @@ export async function POST(request: NextRequest) {
       const { records } = transformEtiology(rawRows, labelers);
       const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
+      // Optional: only send to specific labeler codes
+      const targetCodes: number[] | undefined = body.labelerCodes;
+
       const results: Array<{ name: string; email: string; count: number; success: boolean; error?: string }> = [];
 
       for (const labeler of labelers) {
         if (!labeler.email) continue;
+        if (targetCodes && !targetCodes.includes(labeler.code)) continue;
 
         const incompleteCases = incompleteRecords.filter(
           r => !r.reviewers.find(rev => rev.labelerCode === labeler.code)?.complete,

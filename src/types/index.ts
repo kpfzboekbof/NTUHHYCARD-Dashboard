@@ -107,3 +107,73 @@ export interface LoggingResponse {
   timeline: WeeklyTimeline[];
   fetchedAt: string;
 }
+
+export interface QcRecordFlag {
+  studyId: string;
+  hospital: string;
+  checkId: string;
+  category: 'consistency' | 'logic' | 'chronology' | 'outlier' | 'behavior';
+  severity: 'error' | 'warning';
+  message: string;
+  redcapPage: string;
+}
+
+export interface QcBehaviorFlag {
+  checkId: string;
+  category: 'behavior';
+  severity: 'warning';
+  owner: string;
+  message: string;
+}
+
+export interface QcResponse {
+  recordFlags: QcRecordFlag[];
+  behaviorFlags: QcBehaviorFlag[];
+  fetchedAt: string;
+}
+
+// ============================================================
+// Screening (OHCA 病人擷取)
+// ============================================================
+export type OhcaClass =
+  | 'OHCA'
+  | 'Prehospital_ROSC'
+  | 'Possible_OHCA'
+  | 'Manual_Review'
+  | 'Not_OHCA';
+
+export type ReviewDecision = 'confirmed' | 'excluded' | null;
+
+export interface ScreeningPatient {
+  id: string;
+  site: string;
+  siteName: string;
+  displayGroup: '總院' | '新竹' | '雲林';
+  chartNo: string;
+  name: string;
+  sex: string;
+  age: string;
+  birthday: string;
+  regDate: string;
+  triage: string;
+  disposition: string;
+  lastStatus: string;
+  diagnosis: string;
+  diagnosisFull: string;
+  statOrders: string;
+  statDrugs: string;
+  chiefComplaint: string;
+  presentIllness: string;
+  vitalSigns: Record<string, string>;
+  ohcaClass: OhcaClass;
+  reviewed: ReviewDecision;
+  reviewedAt?: string;
+}
+
+export interface ScreeningResponse {
+  month: string;
+  dates: string[];
+  patients: ScreeningPatient[];
+  availableMonths: string[];
+  fetchedAt: string;
+}

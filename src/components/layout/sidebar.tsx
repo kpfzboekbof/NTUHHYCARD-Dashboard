@@ -4,18 +4,20 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
-  Home, LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope,
+  Home, LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope, ShieldCheck, HeartPulse,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/',              label: '首頁',       icon: Home },
-  { href: '/dashboard',     label: '總覽',       icon: LayoutDashboard },
-  { href: '/owners',        label: '負責人進度', icon: Users },
-  { href: '/incomplete',    label: '未完成清單', icon: ListChecks },
-  { href: '/etiology',      label: 'Etiology',   icon: Stethoscope },
-  { href: '/heatmap',       label: '熱力圖',     icon: Grid3X3 },
-  { href: '/productivity',  label: '鍵入進度',   icon: Keyboard },
-  { href: '/assign',        label: '管理者',     icon: Shield },
+  { href: '/',              label: '首頁',         icon: Home },
+  { href: '/dashboard',     label: '總覽',         icon: LayoutDashboard },
+  { href: '/owners',        label: '負責人進度',   icon: Users },
+  { href: '/incomplete',    label: '未完成清單',   icon: ListChecks },
+  { href: '/etiology',      label: 'Etiology',     icon: Stethoscope },
+  { href: '/qc',            label: '品質管制',     icon: ShieldCheck },
+  { href: '/heatmap',       label: '熱力圖',       icon: Grid3X3 },
+  { href: '/productivity',  label: '鍵入進度',     icon: Keyboard },
+  { href: '/screening',     label: 'OHCA病人擷取', icon: HeartPulse },
+  { href: '/assign',        label: '管理者',       icon: Shield },
 ];
 
 interface SidebarProps {

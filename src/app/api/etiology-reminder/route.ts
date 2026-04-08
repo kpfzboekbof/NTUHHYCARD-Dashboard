@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import nodemailer from 'nodemailer';
+import * as nodemailer from 'nodemailer';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';

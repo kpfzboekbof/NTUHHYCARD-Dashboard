@@ -4,8 +4,18 @@ export function buildReminderEmail(
   labelerName: string,
   meetingDate: string,
   incompleteCaseIds: string[],
+  idRange?: { from: number | null; to: number | null },
 ): { subject: string; html: string } {
-  const subject = `[OHCA Etiology] 共識會議提醒 — ${incompleteCaseIds.length} 筆待完成`;
+  const count = incompleteCaseIds.length;
+  const subject = `[OHCA Etiology] 共識會議提醒 — ${count} 筆待完成`;
+
+  const rangeText = idRange?.from != null && idRange?.to != null
+    ? `（ID ${idRange.from} ~ ${idRange.to}）`
+    : idRange?.from != null
+      ? `（ID ≥ ${idRange.from}）`
+      : idRange?.to != null
+        ? `（ID ≤ ${idRange.to}）`
+        : '';
 
   const caseRows = incompleteCaseIds
     .map(id => {
@@ -26,12 +36,8 @@ export function buildReminderEmail(
   <h2 style="color:#1f2937;margin-bottom:4px;">OHCA Etiology 共識會議提醒</h2>
   <p style="color:#6b7280;margin-top:0;">此為系統自動發送的提醒信件</p>
 
-  <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;margin:20px 0;border-radius:4px;">
-    <strong>共識會議日期：${meetingDate}</strong>
-  </div>
-
   <p>${labelerName} 您好，</p>
-  <p>以下 <strong>${incompleteCaseIds.length}</strong> 筆 Etiology 登錄尚未完成，請在共識會議前完成審閱：</p>
+  <p>您還有 <strong>${count}</strong> 筆未完成的死因判讀${rangeText}，請在 <strong>${meetingDate}</strong> 前完成，感謝您對 OHCA 資料庫之貢獻。</p>
 
   <table style="width:100%;border-collapse:collapse;margin:16px 0;">
     <thead>

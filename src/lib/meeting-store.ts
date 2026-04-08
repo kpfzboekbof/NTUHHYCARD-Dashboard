@@ -1,5 +1,7 @@
 export interface MeetingSettings {
   meetingDate: string | null;       // ISO date string (YYYY-MM-DD)
+  idFrom: number | null;            // Study ID range start (inclusive)
+  idTo: number | null;              // Study ID range end (inclusive)
   reminderSentAt: string | null;    // ISO datetime of last reminder sent
 }
 
@@ -16,9 +18,9 @@ async function readRedis(): Promise<MeetingSettings> {
     });
     await client.connect();
     const raw = await client.get(REDIS_KEY);
-    return raw ? JSON.parse(raw) : { meetingDate: null, reminderSentAt: null };
+    return raw ? JSON.parse(raw) : { meetingDate: null, idFrom: null, idTo: null, reminderSentAt: null };
   } catch {
-    return { meetingDate: null, reminderSentAt: null };
+    return { meetingDate: null, idFrom: null, idTo: null, reminderSentAt: null };
   } finally {
     client?.disconnect();
   }
@@ -46,7 +48,7 @@ function readLocal(): MeetingSettings {
     const raw = readFileSync(join(process.cwd(), 'data', 'meeting-settings.json'), 'utf-8');
     return JSON.parse(raw);
   } catch {
-    return { meetingDate: null, reminderSentAt: null };
+    return { meetingDate: null, idFrom: null, idTo: null, reminderSentAt: null };
   }
 }
 

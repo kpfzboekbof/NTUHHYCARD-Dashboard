@@ -6,6 +6,7 @@ import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import { getMeetingSettings, setMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
+import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 function generateAdminToken(): string {
   const adminPw = process.env.ADMIN_PASSWORD || '';
@@ -37,6 +38,14 @@ function createTransporter() {
   });
 }
 
+/** Filter incomplete records by ID range */
+function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo: number | null): EtiologyRecord[] {
+  let result = records.filter(r => r.finalCode === null);
+  if (idFrom != null) result = result.filter(r => parseInt(r.studyId) >= idFrom);
+  if (idTo != null) result = result.filter(r => parseInt(r.studyId) <= idTo);
+  return result;
+}
+
 /** GET — reminder status: per-labeler incomplete counts + meeting settings */
 export async function GET() {
   try {
@@ -47,7 +56,7 @@ export async function GET() {
     ]);
 
     const { records } = transformEtiology(rawRows, labelers);
-    const incompleteRecords = records.filter(r => r.finalCode === null);
+    const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
     const labelerStatus = labelers.map(l => {
       const incompleteCases = incompleteRecords.filter(
@@ -65,6 +74,8 @@ export async function GET() {
     return NextResponse.json({
       labelerStatus,
       meetingDate: settings.meetingDate,
+      idFrom: settings.idFrom,
+      idTo: settings.idTo,
       reminderSentAt: settings.reminderSentAt,
       totalIncompleteRecords: incompleteRecords.length,
     });
@@ -74,7 +85,7 @@ export async function GET() {
   }
 }
 
-/** POST — send reminder emails or update meeting date */
+/** POST — send reminder emails or update meeting settings */
 export async function POST(request: NextRequest) {
   try {
     if (!(await verifyAdmin())) {
@@ -83,12 +94,14 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    // Update meeting date only
-    if (body.action === 'setMeetingDate') {
+    // Update meeting settings (date + ID range)
+    if (body.action === 'updateSettings') {
       const settings = await getMeetingSettings();
-      settings.meetingDate = body.meetingDate || null;
+      if ('meetingDate' in body) settings.meetingDate = body.meetingDate || null;
+      if ('idFrom' in body) settings.idFrom = body.idFrom ?? null;
+      if ('idTo' in body) settings.idTo = body.idTo ?? null;
       await setMeetingSettings(settings);
-      return NextResponse.json({ ok: true, meetingDate: settings.meetingDate });
+      return NextResponse.json({ ok: true, ...settings });
     }
 
     // Send reminder emails
@@ -111,7 +124,7 @@ export async function POST(request: NextRequest) {
       }
 
       const { records } = transformEtiology(rawRows, labelers);
-      const incompleteRecords = records.filter(r => r.finalCode === null);
+      const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
       const results: Array<{ name: string; email: string; count: number; success: boolean; error?: string }> = [];
 
@@ -131,6 +144,7 @@ export async function POST(request: NextRequest) {
           labeler.name,
           settings.meetingDate,
           incompleteCases.map(r => r.studyId),
+          { from: settings.idFrom, to: settings.idTo },
         );
 
         try {

@@ -51,6 +51,8 @@ export default function EtiologyPage() {
 
   // Reminder state
   const [meetingDate, setMeetingDate] = useState('');
+  const [reminderIdFrom, setReminderIdFrom] = useState('');
+  const [reminderIdTo, setReminderIdTo] = useState('');
   const [reminderSentAt, setReminderSentAt] = useState<string | null>(null);
   const [reminderStatus, setReminderStatus] = useState<Array<{
     code: number; name: string; email: string | null; incompleteCount: number;
@@ -76,6 +78,8 @@ export default function EtiologyPage() {
       const d = await res.json();
       if (res.ok) {
         setMeetingDate(d.meetingDate || '');
+        setReminderIdFrom(d.idFrom != null ? String(d.idFrom) : '');
+        setReminderIdTo(d.idTo != null ? String(d.idTo) : '');
         setReminderSentAt(d.reminderSentAt || null);
         setReminderStatus(d.labelerStatus || []);
       }
@@ -122,14 +126,26 @@ export default function EtiologyPage() {
     setViewMode('tracking');
   }, []);
 
-  const handleSaveMeetingDate = useCallback(async (date: string) => {
-    setMeetingDate(date);
+  const handleSaveSettings = useCallback(async (overrides: { meetingDate?: string; idFrom?: string; idTo?: string }) => {
+    const newDate = overrides.meetingDate ?? meetingDate;
+    const newFrom = overrides.idFrom ?? reminderIdFrom;
+    const newTo = overrides.idTo ?? reminderIdTo;
+    if ('meetingDate' in overrides) setMeetingDate(newDate);
+    if ('idFrom' in overrides) setReminderIdFrom(newFrom);
+    if ('idTo' in overrides) setReminderIdTo(newTo);
     await fetch('/api/etiology-reminder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'setMeetingDate', meetingDate: date || null }),
+      body: JSON.stringify({
+        action: 'updateSettings',
+        meetingDate: newDate || null,
+        idFrom: newFrom ? parseInt(newFrom) : null,
+        idTo: newTo ? parseInt(newTo) : null,
+      }),
     });
-  }, []);
+    // Refresh labeler counts with new range
+    fetchReminderStatus();
+  }, [meetingDate, reminderIdFrom, reminderIdTo, fetchReminderStatus]);
 
   const handleSendReminder = useCallback(async () => {
     setSendingReminder(true);
@@ -245,8 +261,8 @@ export default function EtiologyPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Meeting date setting */}
-                  <div className="flex flex-wrap items-center gap-3">
+                  {/* Meeting settings */}
+                  <div className="flex flex-wrap items-center gap-4">
                     <label className="flex items-center gap-2 text-sm font-medium">
                       <Calendar className="h-4 w-4 text-zinc-500" />
                       共識會議日期
@@ -255,7 +271,7 @@ export default function EtiologyPage() {
                       type="date"
                       className="rounded border px-3 py-1.5 text-sm"
                       value={meetingDate}
-                      onChange={e => handleSaveMeetingDate(e.target.value)}
+                      onChange={e => handleSaveSettings({ meetingDate: e.target.value })}
                     />
                     {meetingDate && (() => {
                       const diff = Math.ceil((new Date(meetingDate).getTime() - Date.now()) / 86400000);
@@ -272,6 +288,33 @@ export default function EtiologyPage() {
                       }
                       return <span className="text-xs text-red-500">會議已過</span>;
                     })()}
+                  </div>
+
+                  {/* ID range setting */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-medium">ID 範圍</span>
+                    <input
+                      type="number"
+                      placeholder="從"
+                      className="w-24 rounded border px-2 py-1.5 text-sm"
+                      value={reminderIdFrom}
+                      onBlur={e => handleSaveSettings({ idFrom: e.target.value })}
+                      onChange={e => setReminderIdFrom(e.target.value)}
+                    />
+                    <span className="text-zinc-400">—</span>
+                    <input
+                      type="number"
+                      placeholder="到"
+                      className="w-24 rounded border px-2 py-1.5 text-sm"
+                      value={reminderIdTo}
+                      onBlur={e => handleSaveSettings({ idTo: e.target.value })}
+                      onChange={e => setReminderIdTo(e.target.value)}
+                    />
+                    {(reminderIdFrom || reminderIdTo) && (
+                      <span className="text-xs text-zinc-500">
+                        僅統計此範圍內的未完成筆數
+                      </span>
+                    )}
                   </div>
 
                   {/* Labeler incomplete summary */}

@@ -107,27 +107,3 @@ export interface LoggingResponse {
   timeline: WeeklyTimeline[];
   fetchedAt: string;
 }
-
-export interface QcRecordFlag {
-  studyId: string;
-  hospital: string;
-  checkId: string;
-  category: 'consistency' | 'logic' | 'chronology' | 'outlier' | 'behavior';
-  severity: 'error' | 'warning';
-  message: string;
-  redcapPage: string;
-}
-
-export interface QcBehaviorFlag {
-  checkId: string;
-  category: 'behavior';
-  severity: 'warning';
-  owner: string;
-  message: string;
-}
-
-export interface QcResponse {
-  recordFlags: QcRecordFlag[];
-  behaviorFlags: QcBehaviorFlag[];
-  fetchedAt: string;
-}

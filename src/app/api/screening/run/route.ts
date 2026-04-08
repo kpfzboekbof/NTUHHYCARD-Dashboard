@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   const date = body.date || new Date().toISOString().slice(0, 10).replace(/-/g, '/');
   const site = body.site || '';
 
-  const scraperDir = path.join(process.cwd(), '..', 'scraper');
+  const scraperDir = process.env.SCRAPER_DIR || path.join(process.cwd(), '..', 'scraper');
   const python = process.env.PYTHON_PATH || 'python3';
 
   let cmd = `cd "${scraperDir}" && ${python} main.py --date "${date}"`;

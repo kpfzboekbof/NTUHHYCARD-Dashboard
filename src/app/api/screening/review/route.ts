@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR = path.join(process.cwd(), 'data', 'screening');
+const DATA_DIR = process.env.SCREENING_DATA_DIR || path.join(process.cwd(), 'data', 'screening');
 
 /** Verify admin auth */
 async function isAuthenticated(): Promise<boolean> {

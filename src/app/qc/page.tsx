@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQcData } from '@/hooks/use-qc-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity, Copy } from 'lucide-react';
+import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity, Copy, Wrench } from 'lucide-react';
 import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/config/qc-checks';
 import { HOSPITALS } from '@/config/hospitals';
 
@@ -34,6 +34,8 @@ export default function QcPage() {
   const [search, setSearch] = useState('');
   const [lastVisited, setLastVisited] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [fixing, setFixing] = useState(false);
+  const [fixResult, setFixResult] = useState<{ updated: number; studyIds: string[] } | null>(null);
 
   // Merge all flags into unified list
   const allFlags = useMemo(() => {
@@ -114,6 +116,30 @@ export default function QcPage() {
     return ALL_CHECK_META.filter(c => c.category === activeCategory);
   }, [activeCategory]);
 
+  const FIXABLE_CHECKS = new Set(['B1']);
+  const canFix = activeCheck !== 'all' && FIXABLE_CHECKS.has(activeCheck) && (checkCounts[activeCheck] || 0) > 0;
+
+  async function handleBatchFix() {
+    if (!confirm(`確定要批次修正 ${activeCheck} 的所有異常記錄？此操作將直接寫入 REDCap。`)) return;
+    setFixing(true);
+    setFixResult(null);
+    try {
+      const res = await fetch('/api/qc/fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checkId: activeCheck }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '修正失敗');
+      setFixResult(json);
+      refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '修正失敗');
+    } finally {
+      setFixing(false);
+    }
+  }
+
   return (
     <div>
       <Header title="品質管制" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} />
@@ -124,6 +150,15 @@ export default function QcPage() {
             <strong>載入失敗：</strong> {error.message || '未知錯誤'}
           </div>
         )}
+        {fixResult && (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-400">
+            已修正 <strong>{fixResult.updated}</strong> 筆記錄
+            {fixResult.studyIds.length > 0 && (
+              <span className="ml-1">(Study ID: {fixResult.studyIds.join(', ')})</span>
+            )}
+          </div>
+        )}
+
         {/* Summary Cards */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {(Object.entries(CATEGORY_CONFIG) as [keyof typeof CATEGORY_CONFIG, typeof CATEGORY_CONFIG[keyof typeof CATEGORY_CONFIG]][]).map(([key, cfg]) => {
@@ -177,6 +212,17 @@ export default function QcPage() {
                   </option>
                 ))}
               </select>
+
+              {canFix && (
+                <button
+                  className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+                  disabled={fixing}
+                  onClick={handleBatchFix}
+                >
+                  <Wrench className="h-3.5 w-3.5" />
+                  {fixing ? '修正中...' : `批次修正 ${activeCheck}`}
+                </button>
+              )}
 
               <input
                 type="text"

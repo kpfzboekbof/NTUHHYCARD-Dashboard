@@ -247,6 +247,10 @@ export async function fetchQcRecords(): Promise<Record<string, string>[]> {
     'edoutcome_core', 'sur_icu',
     // B2: ini_dnr + defibrillation (ini_dnr already above)
     'defibrillation',
+    // B3: sur_icu vs sur_dis (sur_icu already above)
+    'sur_dis',
+    // B4-B5: edoutcome_core vs cpc, sur_dis vs cpc (edoutcome_core, sur_dis already above)
+    'cpc',
     // C1, C2, C3
     'icu_ad_time', 'hosp_dis_time', 'wlst_time',
     // E1

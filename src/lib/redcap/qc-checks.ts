@@ -30,7 +30,7 @@ function parseTime(val: string | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// ---- per-record checks (A1-A4, B1-B2, C1-C3, E1, E3) ----
+// ---- per-record checks (A1-A4, B1-B5, C1-C3, E1, E3) ----
 
 export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
   const flags: QcFlag[] = [];
@@ -112,6 +112,33 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
       flags.push({
         studyId, hospital, checkId: 'B2', category: 'logic', severity: 'warning',
         message: `初始 DNR=是, 但有電擊記錄`,
+        redcapPage: 'ntuh_nhi_outcome',
+      });
+    }
+
+    // B3: sur_icu=0 (急診死亡) but sur_dis=1 (存活出院)
+    if (r.sur_icu === '0' && r.sur_dis === '1') {
+      flags.push({
+        studyId, hospital, checkId: 'B3', category: 'logic', severity: 'error',
+        message: `sur_icu=0（急診死亡）, sur_dis=1（存活出院）`,
+        redcapPage: 'ntuh_nhi_outcome',
+      });
+    }
+
+    // B4: edoutcome_core=0 (急診死亡) but cpc=1~4
+    if (r.edoutcome_core === '0' && isFilled(r.cpc) && ['1','2','3','4'].includes(r.cpc)) {
+      flags.push({
+        studyId, hospital, checkId: 'B4', category: 'logic', severity: 'error',
+        message: `edoutcome_core=0（急診死亡）, cpc=${r.cpc}（非死亡）`,
+        redcapPage: 'ntuh_nhi_core',
+      });
+    }
+
+    // B5: sur_dis=0 (出院死亡) but cpc=1~4
+    if (r.sur_dis === '0' && isFilled(r.cpc) && ['1','2','3','4'].includes(r.cpc)) {
+      flags.push({
+        studyId, hospital, checkId: 'B5', category: 'logic', severity: 'error',
+        message: `sur_dis=0（出院死亡）, cpc=${r.cpc}（非死亡）`,
         redcapPage: 'ntuh_nhi_outcome',
       });
     }

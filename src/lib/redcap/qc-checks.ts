@@ -53,8 +53,9 @@ export function runRecordChecks(rows: Record<string, string>[]): QcFlag[] {
 
     // ── A: 重複欄位衝突 (consistency) ──
 
-    // A1: initial_dnr_core vs ini_dnr — 值應相同
-    if (isFilled(r.initial_dnr_core) && isFilled(r.ini_dnr) && r.initial_dnr_core !== r.ini_dnr) {
+    // A1: initial_dnr_core vs ini_dnr — 值應相同 (initial_dnr_core=1, ini_dnr=2 視為相容)
+    const a1Compatible = r.initial_dnr_core === '1' && r.ini_dnr === '2';
+    if (isFilled(r.initial_dnr_core) && isFilled(r.ini_dnr) && r.initial_dnr_core !== r.ini_dnr && !a1Compatible) {
       flags.push({
         studyId, hospital, checkId: 'A1', category: 'consistency', severity: 'error',
         message: `initial_dnr_core=${r.initial_dnr_core}, ini_dnr=${r.ini_dnr}`,

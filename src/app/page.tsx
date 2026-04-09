@@ -1,16 +1,19 @@
 import Link from 'next/link';
 import {
   LayoutDashboard, Grid3X3, Users, ListChecks, Keyboard, Stethoscope, HeartPulse,
+  ShieldCheck, Shield,
 } from 'lucide-react';
 
 const PAGES = [
   { href: '/dashboard',    label: '總覽',         desc: '檢視整體完成率與各表單進度',     icon: LayoutDashboard, color: 'bg-blue-500' },
-  { href: '/heatmap',      label: '熱力圖',       desc: '以熱力圖呈現各記錄完成狀態',     icon: Grid3X3,         color: 'bg-emerald-500' },
   { href: '/owners',       label: '負責人進度',   desc: '各負責人的完成率與統計分析',       icon: Users,           color: 'bg-violet-500' },
-  { href: '/etiology',     label: 'Etiology',     desc: '追蹤病因共識審查進度與 final 完成狀態', icon: Stethoscope, color: 'bg-teal-500' },
   { href: '/incomplete',   label: '未完成清單',   desc: '列出所有未完成與未驗證的記錄',     icon: ListChecks,      color: 'bg-rose-500' },
+  { href: '/etiology',     label: 'Etiology',     desc: '追蹤病因共識審查進度與 final 完成狀態', icon: Stethoscope, color: 'bg-teal-500' },
+  { href: '/qc',           label: '品質管制',     desc: '檢視資料一致性、邏輯與登錄行為異常', icon: ShieldCheck,     color: 'bg-amber-500' },
+  { href: '/heatmap',      label: '熱力圖',       desc: '以熱力圖呈現各記錄完成狀態',     icon: Grid3X3,         color: 'bg-emerald-500' },
   { href: '/productivity', label: '鍵入進度',     desc: '追蹤各負責人的鍵入活動與時間軸',  icon: Keyboard,        color: 'bg-cyan-500' },
   { href: '/screening',    label: 'OHCA病人擷取', desc: '每日自動掃描急診一級病人，篩選 OHCA 名單', icon: HeartPulse, color: 'bg-red-500' },
+  { href: '/assign',       label: '管理者',       desc: '指派負責人、調整表單設定與目標',   icon: Shield,          color: 'bg-slate-600' },
 ];
 
 export default function HomePage() {

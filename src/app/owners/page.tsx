@@ -24,10 +24,10 @@ export default function OwnersPage() {
   const { data, isLoading, refresh } = useCompletionData();
   const { filters } = useFilters();
   const rows = data?.rows ? filterRows(data.rows, filters) : [];
-  const owners = data?.byOwner?.map(o => o.owner) ?? [];
+  const owners = data?.byOwner?.map(o => o.owner).filter(o => o !== '未指派') ?? [];
 
   const ownerStats = useMemo(() => {
-    const validRows = rows.filter(r => !r.excluded);
+    const validRows = rows.filter(r => !r.excluded && r.owner !== '未指派');
     const map = new Map<string, { total: number; complete: number; unverified: number; incomplete: number; forms: Set<string>; records: Set<string>; validRecords: Set<string> }>();
     for (const r of validRows) {
       let s = map.get(r.owner);
@@ -58,7 +58,7 @@ export default function OwnersPage() {
   const ownerFormMatrix = useMemo(() => {
     const result: { owner: string; form: string; label: string; pct: number }[] = [];
     const grouped = new Map<string, Map<string, { total: number; complete: number }>>();
-    for (const r of rows.filter(r => !r.excluded)) {
+    for (const r of rows.filter(r => !r.excluded && r.owner !== '未指派')) {
       const key = r.owner;
       if (!grouped.has(key)) grouped.set(key, new Map());
       const fm = grouped.get(key)!;

@@ -234,6 +234,63 @@ export async function importEtiologyFinal(studyId: string, code: number): Promis
   }
 }
 
+/** Batch import field values into REDCap. Returns the number of records updated. */
+export async function batchImportField(
+  records: Array<{ study_id: string; [field: string]: string }>,
+): Promise<number> {
+  if (records.length === 0) return 0;
+  const data = JSON.stringify(records);
+  const res = await redcapPost({
+    content: 'record',
+    action: 'import',
+    format: 'json',
+    type: 'flat',
+    overwriteBehavior: 'overwrite',
+    data,
+  });
+  const text = await res.text();
+  const match = text.match(/(\d+)/);
+  const count = match ? parseInt(match[1]) : 0;
+  if (count < 1) {
+    throw new Error(`REDCap batch import returned unexpected response: ${text}`);
+  }
+  return count;
+}
+
+/** Fetch fields needed for QC record-level checks */
+export async function fetchQcRecords(): Promise<Record<string, string>[]> {
+  // Note: redcap_repeat_instrument is included automatically in CSV output
+  const fields = [
+    'study_id', 'hospital', 'exclusion',
+    // A1-A2: 重複欄位衝突 (DNR)
+    'initial_dnr_core', 'ini_dnr', 'mid_dnr_core', 'mid_dnr',
+    // A3: any_rosc vs ever_rosc + prehos_rosc_core
+    'any_rosc', 'ever_rosc', 'prehos_rosc_core',
+    // A4: edoutcome_core vs sur_icu
+    'edoutcome_core', 'sur_icu',
+    // B2: ini_dnr + defibrillation (ini_dnr already above)
+    'defibrillation',
+    // B3: sur_icu vs sur_dis (sur_icu already above)
+    'sur_dis',
+    // B4-B5: edoutcome_core vs cpc, sur_dis vs cpc (edoutcome_core, sur_dis already above)
+    'cpc',
+    // C1, C2, C3
+    'icu_ad_time', 'hosp_dis_time', 'wlst_time',
+    // E1
+    'duration',
+    // E3
+    'emt_core', 'emtp_core', 'witnessed_core',
+    'bystander_core', 'pad_core', 'manual_core', 'mcc_core', 'aed_core',
+  ];
+  const res = await redcapPost({
+    content: 'record',
+    format: 'csv',
+    fields: fields.join(','),
+  });
+  const text = await res.text();
+  return parseCsv(text);
+}
+
 export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[]> {
   const beginDate = new Date();
   beginDate.setMonth(beginDate.getMonth() - monthsBack);

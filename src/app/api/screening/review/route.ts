@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { list, put } from '@vercel/blob';
+import { get, put } from '@vercel/blob';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const BLOB_PREFIX = 'screening/';
 
@@ -44,13 +47,13 @@ export async function POST(request: NextRequest) {
 
   const reviewPath = `${BLOB_PREFIX}${month}/_reviews.json`;
 
-  // 讀取現有審核紀錄
+  // 讀取現有審核紀錄（private blob）
   let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
   try {
-    const { blobs } = await list({ prefix: reviewPath });
-    if (blobs.length > 0) {
-      const res = await fetch(blobs[0].url);
-      reviews = await res.json();
+    const result = await get(reviewPath, { access: 'private' });
+    if (result && result.statusCode === 200 && result.stream) {
+      const text = await new Response(result.stream).text();
+      reviews = JSON.parse(text);
     }
   } catch {
     // 不存在就用空物件
@@ -62,11 +65,22 @@ export async function POST(request: NextRequest) {
     reviewedAt: new Date().toISOString(),
   };
 
-  await put(reviewPath, JSON.stringify(reviews, null, 2), {
-    access: 'public',
-    contentType: 'application/json',
-    addRandomSuffix: false,
-  });
+  try {
+    await put(reviewPath, JSON.stringify(reviews, null, 2), {
+      access: 'private',
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: 'Vercel Blob 寫入失敗',
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ ok: true, id, decision });
 }

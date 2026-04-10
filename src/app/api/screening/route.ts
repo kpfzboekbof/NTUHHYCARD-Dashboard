@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { list, put } from '@vercel/blob';
+import { list, get } from '@vercel/blob';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const BLOB_PREFIX = 'screening/';
+
+/** Read a private blob's JSON content via authenticated get(). */
+async function readPrivateJson(pathname: string): Promise<unknown | null> {
+  const result = await get(pathname, { access: 'private' });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  const text = await new Response(result.stream).text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 /** Verify admin auth (cookie-based, for Dashboard UI) */
 async function isAuthenticated(): Promise<boolean> {
@@ -41,8 +56,10 @@ export async function GET(request: NextRequest) {
   let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
   const reviewBlob = blobs.find(b => b.pathname.endsWith('/_reviews.json'));
   if (reviewBlob) {
-    const res = await fetch(reviewBlob.url);
-    reviews = await res.json();
+    const content = await readPrivateJson(reviewBlob.pathname);
+    if (content && typeof content === 'object') {
+      reviews = content as typeof reviews;
+    }
   }
 
   // 讀取每日 JSON
@@ -58,14 +75,16 @@ export async function GET(request: NextRequest) {
     const dateStr = filename.replace('.json', '');
     dates.push(dateStr);
 
-    const res = await fetch(blob.url);
-    const content = await res.json();
+    const content = await readPrivateJson(blob.pathname) as
+      | { patients?: Record<string, unknown>[] }
+      | null;
+    if (!content) continue;
 
     for (const patient of content.patients || []) {
-      const review = reviews[patient.id];
-      if (review) {
-        patient.reviewed = review.decision;
-        patient.reviewedAt = review.reviewedAt;
+      const id = patient.id as string | undefined;
+      if (id && reviews[id]) {
+        patient.reviewed = reviews[id].decision;
+        patient.reviewedAt = reviews[id].reviewedAt;
       }
       allPatients.push(patient);
     }

@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
   // 存入 Vercel Blob
   try {
     const blob = await put(blobPath, JSON.stringify(body, null, 2), {
-      access: 'public',
+      access: 'private',
       contentType: 'application/json',
       addRandomSuffix: false,
       allowOverwrite: true,

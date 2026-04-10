@@ -62,9 +62,23 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // site_key → displayGroup 對照（生醫歸在新竹）
+  const SITE_TO_GROUP: Record<string, string> = {
+    main: '總院',
+    hsinchu: '新竹',
+    bio: '新竹',
+    yunlin: '雲林',
+  };
+
   // 讀取每日 JSON
   const allPatients: Record<string, unknown>[] = [];
-  const dates: string[] = [];
+  const datesSet = new Set<string>();
+  // 每個院區已掃描的日期
+  const scannedByGroup: Record<string, Set<string>> = {
+    '總院': new Set(),
+    '新竹': new Set(),
+    '雲林': new Set(),
+  };
 
   const dayBlobs = blobs
     .filter(b => b.pathname.endsWith('.json') && !b.pathname.endsWith('_reviews.json'))
@@ -72,13 +86,34 @@ export async function GET(request: NextRequest) {
 
   for (const blob of dayBlobs) {
     const filename = blob.pathname.split('/').pop() || '';
-    const dateStr = filename.replace('.json', '');
-    dates.push(dateStr);
+    const base = filename.replace('.json', '');
+    // 新格式: "2025-06-12__hsinchu"；舊格式: "2025-06-12"
+    let dateStr = base;
+    let siteKey: string | null = null;
+    const sepIdx = base.indexOf('__');
+    if (sepIdx > 0) {
+      dateStr = base.slice(0, sepIdx);
+      siteKey = base.slice(sepIdx + 2);
+    }
+    datesSet.add(dateStr);
 
     const content = await readPrivateJson(blob.pathname) as
-      | { patients?: Record<string, unknown>[] }
+      | { patients?: Record<string, unknown>[]; displayGroup?: string }
       | null;
     if (!content) continue;
+
+    // 標記此院區此日已掃描
+    const groupFromPayload =
+      typeof content.displayGroup === 'string' ? content.displayGroup : null;
+    const group = groupFromPayload || (siteKey ? SITE_TO_GROUP[siteKey] : null);
+    if (group && scannedByGroup[group]) {
+      scannedByGroup[group].add(dateStr);
+    } else if (!siteKey) {
+      // Legacy 檔案（沒 site 資訊）→ 保守地標記所有院區
+      for (const g of Object.keys(scannedByGroup)) {
+        scannedByGroup[g].add(dateStr);
+      }
+    }
 
     for (const patient of content.patients || []) {
       const id = patient.id as string | undefined;
@@ -88,6 +123,12 @@ export async function GET(request: NextRequest) {
       }
       allPatients.push(patient);
     }
+  }
+
+  const dates = [...datesSet].sort();
+  const scannedByGroupArr: Record<string, string[]> = {};
+  for (const [g, s] of Object.entries(scannedByGroup)) {
+    scannedByGroupArr[g] = [...s].sort();
   }
 
   // 計算可用月份
@@ -104,6 +145,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     month,
     dates,
+    scannedByGroup: scannedByGroupArr,
     patients: allPatients,
     availableMonths,
     fetchedAt: new Date().toISOString(),

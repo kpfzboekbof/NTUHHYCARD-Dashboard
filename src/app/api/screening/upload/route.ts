@@ -18,8 +18,11 @@ const BLOB_PREFIX = 'screening/';
  * Body:
  *   {
  *     "date": "2025-06-12",
+ *     "site": "main" | "hsinchu" | "bio" | "yunlin",
+ *     "siteName": "臺大醫院總院區",
+ *     "displayGroup": "總院" | "新竹" | "雲林",
  *     "scannedAt": "2025-06-12T09:05:00",
- *     "patients": [ ... ]
+ *     "patients": [ ... ]          // 可為空陣列代表「有掃但沒 OHCA」
  *   }
  */
 export async function POST(request: NextRequest) {
@@ -47,7 +50,13 @@ export async function POST(request: NextRequest) {
   }
 
   // 解析 body
-  let body: { date?: string; patients?: unknown[] };
+  let body: {
+    date?: string;
+    site?: string;
+    siteName?: string;
+    displayGroup?: string;
+    patients?: unknown[];
+  };
   try {
     body = await request.json();
   } catch (err) {
@@ -57,7 +66,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { date, patients } = body;
+  const { date, site, patients } = body;
 
   if (!date || !patients) {
     return NextResponse.json(
@@ -66,9 +75,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 只允許白名單 site key（避免路徑被塞奇怪字元）
+  const ALLOWED_SITES = ['main', 'hsinchu', 'bio', 'yunlin'];
+  if (site && !ALLOWED_SITES.includes(site)) {
+    return NextResponse.json(
+      { error: `無效的 site: ${site}` },
+      { status: 400 }
+    );
+  }
+
   // date 格式: "2025-06-12"
   const month = date.slice(0, 7); // "2025-06"
-  const blobPath = `${BLOB_PREFIX}${month}/${date}.json`;
+  // 新格式: {date}__{site}.json；沒給 site 則用舊檔名（legacy 相容）
+  const blobPath = site
+    ? `${BLOB_PREFIX}${month}/${date}__${site}.json`
+    : `${BLOB_PREFIX}${month}/${date}.json`;
 
   // 存入 Vercel Blob
   try {
@@ -80,12 +101,13 @@ export async function POST(request: NextRequest) {
     });
 
     console.log(
-      `[screening/upload] Saved ${blobPath}, ${patients.length} patients`
+      `[screening/upload] Saved ${blobPath}, site=${site || '(legacy)'}, ${patients.length} patients`
     );
 
     return NextResponse.json({
       ok: true,
       date,
+      site: site || null,
       patientsCount: patients.length,
       blobUrl: blob.url,
     });

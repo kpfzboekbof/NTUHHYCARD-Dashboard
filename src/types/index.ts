@@ -173,6 +173,8 @@ export interface ScreeningPatient {
 export interface ScreeningResponse {
   month: string;
   dates: string[];
+  /** 每個院區已掃描的日期列表（YYYY-MM-DD） */
+  scannedByGroup: Record<'總院' | '新竹' | '雲林', string[]>;
   patients: ScreeningPatient[];
   availableMonths: string[];
   fetchedAt: string;

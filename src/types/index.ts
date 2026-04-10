@@ -146,6 +146,8 @@ export type ReviewDecision = 'confirmed' | 'excluded' | null;
 
 export interface ScreeningPatient {
   id: string;
+  /** 掃描所屬日期（YYYY-MM-DD），由 API 附上 */
+  date: string;
   site: string;
   siteName: string;
   displayGroup: '總院' | '新竹' | '雲林';
@@ -170,11 +172,18 @@ export interface ScreeningPatient {
   reviewedAt?: string;
 }
 
+export interface ScanInfo {
+  /** 被掃描的日期 YYYY-MM-DD */
+  date: string;
+  /** scraper 實際執行並上傳的 ISO timestamp（用來判斷「當日已結束後才掃」） */
+  scannedAt: string | null;
+}
+
 export interface ScreeningResponse {
   month: string;
   dates: string[];
-  /** 每個院區已掃描的日期列表（YYYY-MM-DD） */
-  scannedByGroup: Record<'總院' | '新竹' | '雲林', string[]>;
+  /** 每個院區已掃描的日期列表與 scannedAt */
+  scannedByGroup: Record<'總院' | '新竹' | '雲林', ScanInfo[]>;
   patients: ScreeningPatient[];
   availableMonths: string[];
   fetchedAt: string;

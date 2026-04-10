@@ -70,14 +70,17 @@ export async function GET(request: NextRequest) {
     yunlin: '雲林',
   };
 
+  type ScanInfo = { date: string; scannedAt: string | null };
+
   // 讀取每日 JSON
   const allPatients: Record<string, unknown>[] = [];
   const datesSet = new Set<string>();
-  // 每個院區已掃描的日期
-  const scannedByGroup: Record<string, Set<string>> = {
-    '總院': new Set(),
-    '新竹': new Set(),
-    '雲林': new Set(),
+  // 每個院區已掃描的 (date, scannedAt)
+  // key = `${date}|${group}` 用來 dedupe + 保留最新 scannedAt
+  const scanMap: Record<string, Record<string, string | null>> = {
+    '總院': {},
+    '新竹': {},
+    '雲林': {},
   };
 
   const dayBlobs = blobs
@@ -98,20 +101,30 @@ export async function GET(request: NextRequest) {
     datesSet.add(dateStr);
 
     const content = await readPrivateJson(blob.pathname) as
-      | { patients?: Record<string, unknown>[]; displayGroup?: string }
+      | {
+          patients?: Record<string, unknown>[];
+          displayGroup?: string;
+          scannedAt?: string;
+        }
       | null;
     if (!content) continue;
 
-    // 標記此院區此日已掃描
+    const scannedAt = typeof content.scannedAt === 'string' ? content.scannedAt : null;
+
+    // 標記此院區此日已掃描（保留最新的 scannedAt）
     const groupFromPayload =
       typeof content.displayGroup === 'string' ? content.displayGroup : null;
     const group = groupFromPayload || (siteKey ? SITE_TO_GROUP[siteKey] : null);
-    if (group && scannedByGroup[group]) {
-      scannedByGroup[group].add(dateStr);
+    if (group && scanMap[group]) {
+      const prev = scanMap[group][dateStr];
+      // 保留較新的 scannedAt（字串比較 ISO 格式有效）
+      if (!prev || (scannedAt && scannedAt > prev)) {
+        scanMap[group][dateStr] = scannedAt;
+      }
     } else if (!siteKey) {
       // Legacy 檔案（沒 site 資訊）→ 保守地標記所有院區
-      for (const g of Object.keys(scannedByGroup)) {
-        scannedByGroup[g].add(dateStr);
+      for (const g of Object.keys(scanMap)) {
+        if (!(dateStr in scanMap[g])) scanMap[g][dateStr] = scannedAt;
       }
     }
 
@@ -121,14 +134,18 @@ export async function GET(request: NextRequest) {
         patient.reviewed = reviews[id].decision;
         patient.reviewedAt = reviews[id].reviewedAt;
       }
+      // 附上病人所屬的掃描日期（給前端按日期分組用）
+      patient.date = dateStr;
       allPatients.push(patient);
     }
   }
 
   const dates = [...datesSet].sort();
-  const scannedByGroupArr: Record<string, string[]> = {};
-  for (const [g, s] of Object.entries(scannedByGroup)) {
-    scannedByGroupArr[g] = [...s].sort();
+  const scannedByGroup: Record<string, ScanInfo[]> = {};
+  for (const [g, m] of Object.entries(scanMap)) {
+    scannedByGroup[g] = Object.entries(m)
+      .map(([date, scannedAt]) => ({ date, scannedAt }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   // 計算可用月份
@@ -145,7 +162,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     month,
     dates,
-    scannedByGroup: scannedByGroupArr,
+    scannedByGroup,
     patients: allPatients,
     availableMonths,
     fetchedAt: new Date().toISOString(),

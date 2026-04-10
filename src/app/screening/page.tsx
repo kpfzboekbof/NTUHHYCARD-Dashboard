@@ -1,15 +1,19 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Lock, LogOut, Loader2, Check, X, AlertTriangle, Heart } from 'lucide-react';
+import {
+  Lock, LogOut, Loader2, Check, X, AlertTriangle, Heart,
+  ChevronLeft, ChevronRight, Clock,
+} from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { ScreeningTabs } from '@/components/screening/screening-tabs';
 import { useScreeningData } from '@/hooks/use-screening-data';
-import type { ScreeningPatient } from '@/types';
+import type { ScreeningPatient, ScanInfo } from '@/types';
 
 /* ------------------------------------------------------------------ */
-/* 工具：姓名屏蔽（第二字變 O）                                         */
+/* 工具                                                                */
 /* ------------------------------------------------------------------ */
 function maskName(name: string): string {
   if (!name) return '';
@@ -18,9 +22,6 @@ function maskName(name: string): string {
   return chars[0] + 'O' + chars.slice(2).join('');
 }
 
-/* ------------------------------------------------------------------ */
-/* 分類顏色與標籤                                                      */
-/* ------------------------------------------------------------------ */
 function classColor(cls: string) {
   switch (cls) {
     case 'OHCA': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
@@ -39,28 +40,56 @@ function classLabel(cls: string) {
   }
 }
 
+/** 取得 YYYY-MM-DD 格式的今日日期（local time） */
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** YYYY-MM-DD → YYYY-MM */
+function monthOf(date: string): string {
+  return date.slice(0, 7);
+}
+
+/** 將 YYYY-MM-DD 加上 n 天（n 可負） */
+function addDays(date: string, n: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+/** 判斷某日的掃描是否「完整」：scannedAt > 該日 23:59:59 */
+type ScanStatus = 'complete' | 'partial' | 'missing';
+function scanStatus(selectedDate: string, info: ScanInfo | undefined): ScanStatus {
+  if (!info) return 'missing';
+  if (!info.scannedAt) return 'partial'; // 有檔案但沒 timestamp → 視為進行中
+  // 當日結束時間 (local): selectedDate 23:59:59.999
+  const [y, m, d] = selectedDate.split('-').map(Number);
+  const endOfDay = new Date(y, m - 1, d, 23, 59, 59, 999);
+  const scanned = new Date(info.scannedAt);
+  return scanned > endOfDay ? 'complete' : 'partial';
+}
+
 /* ------------------------------------------------------------------ */
-/* 主頁面                                                              */
+/* 主頁面（每日檢視）                                                  */
 /* ------------------------------------------------------------------ */
 const DISPLAY_GROUPS = ['總院', '新竹', '雲林'] as const;
+type DisplayGroup = typeof DISPLAY_GROUPS[number];
 
-export default function ScreeningPage() {
-  // Auth state
+export default function ScreeningDailyPage() {
+  // Auth
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Month selector
-  const [month, setMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
+  // 選擇的日期（YYYY-MM-DD），預設今天
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayStr());
+  const month = monthOf(selectedDate);
 
-  // Data
   const { data, error, isLoading, refresh } = useScreeningData(month);
 
-  // Check auth on mount
   useEffect(() => {
     fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(d.authenticated));
   }, []);
@@ -94,34 +123,35 @@ export default function ScreeningPage() {
     refresh();
   }, [month, refresh]);
 
-  // 過濾 OHCA 相關病人
-  const ohcaPatients = useMemo(() => {
-    if (!data?.patients) return [];
-    return data.patients.filter(p =>
-      p.ohcaClass === 'OHCA' ||
-      p.ohcaClass === 'Prehospital_ROSC' ||
-      p.ohcaClass === 'Possible_OHCA'
-    );
-  }, [data]);
-
-  // 按院區分組
-  const byGroup = useMemo(() => {
-    const groups: Record<string, ScreeningPatient[]> = {};
-    for (const g of DISPLAY_GROUPS) groups[g] = [];
-    for (const p of ohcaPatients) {
-      const g = p.displayGroup || '新竹';
-      if (!groups[g]) groups[g] = [];
-      groups[g].push(p);
+  // 只取該日的 OHCA 相關病人
+  const patientsByGroup = useMemo(() => {
+    const groups: Record<DisplayGroup, ScreeningPatient[]> = {
+      '總院': [], '新竹': [], '雲林': [],
+    };
+    if (!data?.patients) return groups;
+    for (const p of data.patients) {
+      if (p.date !== selectedDate) continue;
+      if (p.ohcaClass !== 'OHCA' && p.ohcaClass !== 'Prehospital_ROSC' && p.ohcaClass !== 'Possible_OHCA') continue;
+      const g = (p.displayGroup || '新竹') as DisplayGroup;
+      if (groups[g]) groups[g].push(p);
     }
     return groups;
-  }, [ohcaPatients]);
+  }, [data, selectedDate]);
 
-  // 月份選項
-  const monthOptions = useMemo(() => {
-    const months = data?.availableMonths || [];
-    if (!months.includes(month)) months.push(month);
-    return [...new Set(months)].sort().reverse();
-  }, [data, month]);
+  // 每院區該日的掃描狀態
+  const scanStatusByGroup = useMemo(() => {
+    const result: Record<DisplayGroup, { status: ScanStatus; info?: ScanInfo }> = {
+      '總院': { status: 'missing' },
+      '新竹': { status: 'missing' },
+      '雲林': { status: 'missing' },
+    };
+    if (!data?.scannedByGroup) return result;
+    for (const g of DISPLAY_GROUPS) {
+      const info = data.scannedByGroup[g]?.find(s => s.date === selectedDate);
+      result[g] = { status: scanStatus(selectedDate, info), info };
+    }
+    return result;
+  }, [data, selectedDate]);
 
   // ---------- Auth loading ----------
   if (authenticated === null) {
@@ -171,36 +201,43 @@ export default function ScreeningPage() {
     );
   }
 
-  // ---------- Authenticated ----------
+  const isToday = selectedDate === todayStr();
+
+  // ---------- Main view ----------
   return (
     <div>
       <Header title="OHCA 病人擷取" />
-      <div className="p-6 space-y-6">
+      <div className="p-6 space-y-4">
+        <ScreeningTabs />
 
-        {/* Top bar */}
+        {/* Top bar: date picker + actions */}
         <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => setSelectedDate(addDays(selectedDate, -1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
           <input
-            type="month"
+            type="date"
             className="rounded border px-3 py-1.5 text-sm"
-            value={month}
-            onChange={e => e.target.value && setMonth(e.target.value)}
+            value={selectedDate}
+            onChange={e => e.target.value && setSelectedDate(e.target.value)}
+            max={todayStr()}
           />
-          {monthOptions.length > 0 && (
-            <select
-              className="rounded border px-2 py-1.5 text-xs text-zinc-600"
-              value=""
-              onChange={e => e.target.value && setMonth(e.target.value)}
-              title="快速跳到已有資料的月份"
-            >
-              <option value="">— 已有資料 —</option>
-              {monthOptions.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSelectedDate(addDays(selectedDate, 1))}
+            disabled={isToday}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          {!isToday && (
+            <Button variant="outline" size="sm" onClick={() => setSelectedDate(todayStr())}>
+              回到今天
+            </Button>
           )}
 
           <p className="text-xs text-zinc-400">
-            院內電腦每日 09:00 自動掃描上傳
+            院內電腦每日 09:00 自動掃描前一天
           </p>
 
           <div className="ml-auto flex items-center gap-3">
@@ -219,13 +256,11 @@ export default function ScreeningPage() {
           </div>
         </div>
 
-        {/* Error / Loading */}
         {error && (
           <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             載入失敗: {error.message}
           </div>
         )}
-
         {isLoading && (
           <div className="flex items-center gap-2 text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -233,96 +268,87 @@ export default function ScreeningPage() {
           </div>
         )}
 
-        {/* Summary stats */}
-        {data && (
-          <div className="flex gap-4">
-            <div className="rounded-lg border bg-red-50 px-4 py-2 text-center dark:bg-red-950">
-              <div className="text-2xl font-bold text-red-700 dark:text-red-300">
-                {ohcaPatients.filter(p => p.ohcaClass === 'OHCA').length}
-              </div>
-              <div className="text-xs text-red-600 dark:text-red-400">OHCA</div>
-            </div>
-            <div className="rounded-lg border bg-orange-50 px-4 py-2 text-center dark:bg-orange-950">
-              <div className="text-2xl font-bold text-orange-700 dark:text-orange-300">
-                {ohcaPatients.filter(p => p.ohcaClass === 'Prehospital_ROSC').length}
-              </div>
-              <div className="text-xs text-orange-600 dark:text-orange-400">Prehospital ROSC</div>
-            </div>
-            <div className="rounded-lg border bg-yellow-50 px-4 py-2 text-center dark:bg-yellow-950">
-              <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-300">
-                {ohcaPatients.filter(p => p.ohcaClass === 'Possible_OHCA').length}
-              </div>
-              <div className="text-xs text-yellow-600 dark:text-yellow-400">Possible OHCA</div>
-            </div>
-            <div className="rounded-lg border bg-zinc-50 px-4 py-2 text-center dark:bg-zinc-900">
-              <div className="text-2xl font-bold text-zinc-700 dark:text-zinc-300">
-                {data.dates.length}
-              </div>
-              <div className="text-xs text-zinc-500">已掃描天數</div>
-            </div>
-          </div>
-        )}
-
-        {/* Three-column hospital layout */}
+        {/* Three hospital cards for the selected day */}
         <div className="grid gap-6 lg:grid-cols-3">
           {DISPLAY_GROUPS.map(group => {
-            const scanned = data?.scannedByGroup?.[group] ?? [];
+            const list = patientsByGroup[group];
+            const { status, info } = scanStatusByGroup[group];
             return (
-            <Card key={group}>
-              <CardHeader className="border-b">
-                <CardTitle className="flex items-center gap-2">
-                  <Heart className="h-4 w-4 text-red-500" />
-                  {group}
-                  <span className="ml-auto rounded bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                    {byGroup[group]?.length || 0} 人
-                  </span>
-                </CardTitle>
-                {/* 本院區已掃描日期（scraper 成功完成的日期） */}
-                <div className="mt-2 flex flex-wrap items-center gap-1">
-                  <span className="text-[11px] text-zinc-500">已掃描:</span>
-                  {scanned.length === 0 ? (
-                    <span className="text-[11px] text-zinc-400">尚無</span>
+              <Card key={group}>
+                <CardHeader className="border-b">
+                  <CardTitle className="flex items-center gap-2">
+                    <Heart className="h-4 w-4 text-red-500" />
+                    {group}
+                    <span className="ml-auto rounded bg-zinc-100 px-2 py-0.5 text-xs font-normal text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {list.length} 人
+                    </span>
+                  </CardTitle>
+                  {/* 掃描狀態 */}
+                  <div className="mt-2">
+                    <ScanStatusBadge status={status} info={info} />
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {status === 'missing' ? (
+                    <div className="p-6 text-center text-sm text-zinc-400">
+                      本日尚未掃描
+                    </div>
+                  ) : list.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-zinc-400">
+                      本日無 OHCA 病人
+                    </div>
                   ) : (
-                    scanned.map(d => {
-                      const parts = d.split('-');
-                      const short = parts.length === 3 ? `${Number(parts[1])}/${Number(parts[2])}` : d;
-                      return (
-                        <span
-                          key={d}
-                          title={d}
-                          className="inline-flex items-center rounded bg-green-50 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-950 dark:text-green-300"
-                        >
-                          <Check className="mr-0.5 h-2.5 w-2.5" />
-                          {short}
-                        </span>
-                      );
-                    })
+                    <div className="divide-y">
+                      {list.map(patient => (
+                        <PatientRow
+                          key={patient.id}
+                          patient={patient}
+                          onReview={handleReview}
+                        />
+                      ))}
+                    </div>
                   )}
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                {(!byGroup[group] || byGroup[group].length === 0) ? (
-                  <div className="p-6 text-center text-sm text-zinc-400">
-                    本月無 OHCA 病人
-                  </div>
-                ) : (
-                  <div className="divide-y">
-                    {byGroup[group].map(patient => (
-                      <PatientRow
-                        key={patient.id}
-                        patient={patient}
-                        onReview={handleReview}
-                      />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
             );
           })}
         </div>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 掃描狀態 badge                                                      */
+/* ------------------------------------------------------------------ */
+function ScanStatusBadge({ status, info }: { status: ScanStatus; info?: ScanInfo }) {
+  if (status === 'complete') {
+    return (
+      <span
+        title={info?.scannedAt ? `完成時間: ${new Date(info.scannedAt).toLocaleString('zh-TW')}` : undefined}
+        className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200"
+      >
+        <Check className="h-3 w-3" />
+        完整掃描
+      </span>
+    );
+  }
+  if (status === 'partial') {
+    return (
+      <span
+        title={info?.scannedAt ? `掃描時間: ${new Date(info.scannedAt).toLocaleString('zh-TW')}（當日尚未結束）` : '當日掃描進行中'}
+        className="inline-flex items-center gap-1 rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+      >
+        <Clock className="h-3 w-3" />
+        掃描中（當日尚未結束）
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+      <X className="h-3 w-3" />
+      尚未掃描
+    </span>
   );
 }
 
@@ -356,7 +382,7 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
             <span className="text-xs text-zinc-400">{patient.age}</span>
           </div>
           <div className="mt-0.5 text-xs text-zinc-500">
-            {patient.regDate} · {patient.disposition}
+            {patient.regDate} · {patient.lastStatus || patient.disposition}
           </div>
         </div>
 

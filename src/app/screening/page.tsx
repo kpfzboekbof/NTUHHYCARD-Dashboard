@@ -193,6 +193,28 @@ export default function ScreeningPage() {
             院內電腦每日 09:00 自動掃描上傳
           </p>
 
+          {/* 已掃描日期 badges */}
+          {data?.dates && data.dates.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-xs text-zinc-500">已掃描:</span>
+              {data.dates.map(d => {
+                // d 格式: 2026-04-09 → 顯示 4/9
+                const parts = d.split('-');
+                const short = parts.length === 3 ? `${Number(parts[1])}/${Number(parts[2])}` : d;
+                return (
+                  <span
+                    key={d}
+                    title={d}
+                    className="inline-flex items-center rounded bg-green-50 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-950 dark:text-green-300"
+                  >
+                    <Check className="mr-0.5 h-2.5 w-2.5" />
+                    {short}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
           <div className="ml-auto flex items-center gap-3">
             {data?.fetchedAt && (
               <span className="text-xs text-zinc-400">

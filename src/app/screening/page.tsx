@@ -179,15 +179,25 @@ export default function ScreeningPage() {
 
         {/* Top bar */}
         <div className="flex flex-wrap items-center gap-3">
-          <select
+          <input
+            type="month"
             className="rounded border px-3 py-1.5 text-sm"
             value={month}
-            onChange={e => setMonth(e.target.value)}
-          >
-            {monthOptions.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+            onChange={e => e.target.value && setMonth(e.target.value)}
+          />
+          {monthOptions.length > 0 && (
+            <select
+              className="rounded border px-2 py-1.5 text-xs text-zinc-600"
+              value=""
+              onChange={e => e.target.value && setMonth(e.target.value)}
+              title="快速跳到已有資料的月份"
+            >
+              <option value="">— 已有資料 —</option>
+              {monthOptions.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
 
           <p className="text-xs text-zinc-400">
             院內電腦每日 09:00 自動掃描上傳

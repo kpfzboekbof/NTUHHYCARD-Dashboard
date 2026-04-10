@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 const BLOB_PREFIX = 'screening/';
 
 /**
@@ -35,8 +38,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: '認證失敗' }, { status: 401 });
   }
 
+  // 檢查 Blob token 是否存在（常見的 500 元凶）
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return NextResponse.json(
+      { error: '伺服器未設定 BLOB_READ_WRITE_TOKEN' },
+      { status: 500 }
+    );
+  }
+
   // 解析 body
-  const body = await request.json();
+  let body: { date?: string; patients?: unknown[] };
+  try {
+    body = await request.json();
+  } catch (err) {
+    return NextResponse.json(
+      { error: 'JSON 解析失敗', detail: String(err) },
+      { status: 400 }
+    );
+  }
+
   const { date, patients } = body;
 
   if (!date || !patients) {
@@ -51,18 +71,32 @@ export async function POST(request: NextRequest) {
   const blobPath = `${BLOB_PREFIX}${month}/${date}.json`;
 
   // 存入 Vercel Blob
-  const blob = await put(blobPath, JSON.stringify(body, null, 2), {
-    access: 'public',
-    contentType: 'application/json',
-    addRandomSuffix: false,
-  });
+  try {
+    const blob = await put(blobPath, JSON.stringify(body, null, 2), {
+      access: 'public',
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
 
-  console.log(`[screening/upload] Saved ${blobPath}, ${patients.length} patients`);
+    console.log(
+      `[screening/upload] Saved ${blobPath}, ${patients.length} patients`
+    );
 
-  return NextResponse.json({
-    ok: true,
-    date,
-    patientsCount: patients.length,
-    blobUrl: blob.url,
-  });
+    return NextResponse.json({
+      ok: true,
+      date,
+      patientsCount: patients.length,
+      blobUrl: blob.url,
+    });
+  } catch (err) {
+    console.error('[screening/upload] Blob put failed:', err);
+    return NextResponse.json(
+      {
+        error: 'Vercel Blob 寫入失敗',
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      { status: 500 }
+    );
+  }
 }

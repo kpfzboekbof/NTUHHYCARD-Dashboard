@@ -177,6 +177,8 @@ export interface ScanInfo {
   date: string;
   /** scraper 實際執行並上傳的 ISO timestamp（用來判斷「當日已結束後才掃」） */
   scannedAt: string | null;
+  /** 該日該院區急診總人數 */
+  totalEd?: number | null;
 }
 
 export interface ScreeningResponse {

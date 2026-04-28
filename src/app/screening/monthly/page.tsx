@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Lock, LogOut, Loader2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { LogOut, Loader2 } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
+import { AdminLoginCard } from '@/components/admin-login-card';
 import { ScreeningTabs } from '@/components/screening/screening-tabs';
 import { useScreeningData } from '@/hooks/use-screening-data';
 import type { ScreeningPatient } from '@/types';
@@ -30,6 +32,8 @@ function classLabel(cls: string) {
 
 /** 本月是否要收錄這位病人到月報表 */
 function shouldInclude(p: ScreeningPatient): boolean {
+  // 被人工排除的一律不收
+  if (p.reviewed === 'excluded') return false;
   if (p.ohcaClass === 'OHCA') return true;
   if (p.ohcaClass === 'Prehospital_ROSC') return true;
   // Possible_OHCA：只收已人工確認的
@@ -41,10 +45,8 @@ function shouldInclude(p: ScreeningPatient): boolean {
 /* 月報表頁                                                            */
 /* ------------------------------------------------------------------ */
 export default function ScreeningMonthlyPage() {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+  const auth = useAdminAuth();
+  const { authenticated, handleLogout } = auth;
 
   const [month, setMonth] = useState(() => {
     const d = new Date();
@@ -52,30 +54,6 @@ export default function ScreeningMonthlyPage() {
   });
 
   const { data, error, isLoading, refresh } = useScreeningData(month);
-
-  useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(d.authenticated));
-  }, []);
-
-  const handleLogin = useCallback(async () => {
-    setAuthLoading(true);
-    setAuthError('');
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const d = await res.json();
-      if (res.ok) { setAuthenticated(true); setPassword(''); }
-      else { setAuthError(d.error || '登入失敗'); }
-    } finally { setAuthLoading(false); }
-  }, [password]);
-
-  const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
-    setAuthenticated(false);
-  }, []);
 
   // 過濾 + 排序（依日期、院區）
   const rows = useMemo(() => {
@@ -113,31 +91,7 @@ export default function ScreeningMonthlyPage() {
       <div>
         <Header title="OHCA 病人擷取" />
         <div className="flex min-h-[60vh] items-center justify-center">
-          <Card className="w-80">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Lock className="h-5 w-5" />
-                管理員登入
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <input
-                  type="password"
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  placeholder="請輸入管理員密碼"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  autoFocus
-                />
-                {authError && <p className="text-sm text-red-500">{authError}</p>}
-                <Button className="w-full" onClick={handleLogin} disabled={authLoading || !password}>
-                  {authLoading ? '登入中...' : '登入'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <AdminLoginCard auth={auth} />
         </div>
       </div>
     );

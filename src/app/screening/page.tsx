@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
-  Lock, LogOut, Loader2, Check, X, AlertTriangle, Heart,
+  LogOut, Loader2, Check, X, AlertTriangle, Heart,
   ChevronLeft, ChevronRight, Clock,
 } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
+import { AdminLoginCard } from '@/components/admin-login-card';
 import { ScreeningTabs } from '@/components/screening/screening-tabs';
 import { useScreeningData } from '@/hooks/use-screening-data';
 import type { ScreeningPatient, ScanInfo } from '@/types';
@@ -79,40 +81,14 @@ type DisplayGroup = typeof DISPLAY_GROUPS[number];
 
 export default function ScreeningDailyPage() {
   // Auth
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+  const auth = useAdminAuth();
+  const { authenticated, handleLogout } = auth;
 
   // 選擇的日期（YYYY-MM-DD），預設今天
   const [selectedDate, setSelectedDate] = useState<string>(() => todayStr());
   const month = monthOf(selectedDate);
 
   const { data, error, isLoading, refresh } = useScreeningData(month);
-
-  useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(d.authenticated));
-  }, []);
-
-  const handleLogin = useCallback(async () => {
-    setAuthLoading(true);
-    setAuthError('');
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const d = await res.json();
-      if (res.ok) { setAuthenticated(true); setPassword(''); }
-      else { setAuthError(d.error || '登入失敗'); }
-    } finally { setAuthLoading(false); }
-  }, [password]);
-
-  const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
-    setAuthenticated(false);
-  }, []);
 
   const handleReview = useCallback(async (patientId: string, decision: 'confirmed' | 'excluded') => {
     await fetch('/api/screening/review', {
@@ -171,31 +147,7 @@ export default function ScreeningDailyPage() {
       <div>
         <Header title="OHCA 病人擷取" />
         <div className="flex min-h-[60vh] items-center justify-center">
-          <Card className="w-80">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Lock className="h-5 w-5" />
-                管理員登入
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <input
-                  type="password"
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  placeholder="請輸入管理員密碼"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  autoFocus
-                />
-                {authError && <p className="text-sm text-red-500">{authError}</p>}
-                <Button className="w-full" onClick={handleLogin} disabled={authLoading || !password}>
-                  {authLoading ? '登入中...' : '登入'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <AdminLoginCard auth={auth} />
         </div>
       </div>
     );
@@ -364,6 +316,7 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
   const [expanded, setExpanded] = useState(false);
 
   const isPossible = patient.ohcaClass === 'Possible_OHCA';
+  const isOhcaLike = ['OHCA', 'Prehospital_ROSC'].includes(patient.ohcaClass);
   const isReviewed = patient.reviewed !== null && patient.reviewed !== undefined;
   const isConfirmed = patient.reviewed === 'confirmed';
   const isExcluded = patient.reviewed === 'excluded';
@@ -391,12 +344,12 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
             {classLabel(patient.ohcaClass)}
           </span>
 
-          {isPossible && isConfirmed && (
+          {isConfirmed && (
             <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900 dark:text-green-200">
               <Check className="h-3 w-3" /> 已確認
             </span>
           )}
-          {isPossible && isExcluded && (
+          {isExcluded && (
             <span className="inline-flex items-center gap-0.5 rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
               <X className="h-3 w-3" /> 已排除
             </span>
@@ -437,6 +390,30 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
                 onClick={(e) => { e.stopPropagation(); onReview(patient.id, 'excluded'); }}
               >
                 <X className="mr-1 h-3 w-3" /> 排除
+              </Button>
+            </div>
+          )}
+
+          {isOhcaLike && !isExcluded && (
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={(e) => { e.stopPropagation(); onReview(patient.id, 'excluded'); }}
+              >
+                <X className="mr-1 h-3 w-3" /> 非 OHCA（覆寫）
+              </Button>
+            </div>
+          )}
+
+          {isExcluded && (
+            <div className="flex items-center gap-2 pt-2 border-t">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={(e) => { e.stopPropagation(); onReview(patient.id, 'confirmed'); }}
+              >
+                <Check className="mr-1 h-3 w-3" /> 恢復 OHCA
               </Button>
             </div>
           )}

@@ -248,7 +248,8 @@ export default function ScreeningDailyPage() {
                     <ScanStatusBadge status={status} info={info} />
                     {status !== 'missing' && (
                       <span className="text-xs text-zinc-400">
-                        1 級共 {totals.all} 人
+                        {info?.totalEd != null && <>急診 {info.totalEd} 人 · </>}
+                        1 級 {totals.all} 人
                       </span>
                     )}
                   </div>

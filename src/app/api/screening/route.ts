@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
   const datesSet = new Set<string>();
   // 每個院區已掃描的 (date, scannedAt)
   // key = `${date}|${group}` 用來 dedupe + 保留最新 scannedAt
-  const scanMap: Record<string, Record<string, string | null>> = {
+  const scanMap: Record<string, Record<string, { scannedAt: string | null; totalEd: number | null }>> = {
     '總院': {},
     '新竹': {},
     '雲林': {},
@@ -105,11 +105,13 @@ export async function GET(request: NextRequest) {
           patients?: Record<string, unknown>[];
           displayGroup?: string;
           scannedAt?: string;
+          totalEd?: number;
         }
       | null;
     if (!content) continue;
 
     const scannedAt = typeof content.scannedAt === 'string' ? content.scannedAt : null;
+    const totalEd = typeof content.totalEd === 'number' ? content.totalEd : null;
 
     // 標記此院區此日已掃描（保留最新的 scannedAt）
     const groupFromPayload =
@@ -118,13 +120,13 @@ export async function GET(request: NextRequest) {
     if (group && scanMap[group]) {
       const prev = scanMap[group][dateStr];
       // 保留較新的 scannedAt（字串比較 ISO 格式有效）
-      if (!prev || (scannedAt && scannedAt > prev)) {
-        scanMap[group][dateStr] = scannedAt;
+      if (!prev || (scannedAt && (!prev.scannedAt || scannedAt > prev.scannedAt))) {
+        scanMap[group][dateStr] = { scannedAt, totalEd };
       }
     } else if (!siteKey) {
       // Legacy 檔案（沒 site 資訊）→ 保守地標記所有院區
       for (const g of Object.keys(scanMap)) {
-        if (!(dateStr in scanMap[g])) scanMap[g][dateStr] = scannedAt;
+        if (!(dateStr in scanMap[g])) scanMap[g][dateStr] = { scannedAt, totalEd };
       }
     }
 
@@ -144,7 +146,7 @@ export async function GET(request: NextRequest) {
   const scannedByGroup: Record<string, ScanInfo[]> = {};
   for (const [g, m] of Object.entries(scanMap)) {
     scannedByGroup[g] = Object.entries(m)
-      .map(([date, scannedAt]) => ({ date, scannedAt }))
+      .map(([date, info]) => ({ date, scannedAt: info.scannedAt, totalEd: info.totalEd }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }
 

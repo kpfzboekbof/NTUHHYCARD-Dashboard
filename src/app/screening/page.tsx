@@ -394,7 +394,7 @@ function PatientRow({ patient, onReview }: PatientRowProps) {
             </div>
           )}
 
-          {isOhcaLike && !isExcluded && (
+          {!isExcluded && !isPossible && patient.ohcaClass !== 'Not_OHCA' && (
             <div className="flex items-center gap-2 pt-2 border-t">
               <Button
                 variant="outline"

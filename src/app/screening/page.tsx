@@ -99,19 +99,26 @@ export default function ScreeningDailyPage() {
     refresh();
   }, [month, refresh]);
 
-  // 只取該日的 OHCA 相關病人
-  const patientsByGroup = useMemo(() => {
+  // 該日所有病人（含 Not_OHCA）及 OHCA 相關病人
+  const { patientsByGroup, totalByGroup } = useMemo(() => {
     const groups: Record<DisplayGroup, ScreeningPatient[]> = {
       '總院': [], '新竹': [], '雲林': [],
     };
-    if (!data?.patients) return groups;
+    const totals: Record<DisplayGroup, { all: number }> = {
+      '總院': { all: 0 },
+      '新竹': { all: 0 },
+      '雲林': { all: 0 },
+    };
+    if (!data?.patients) return { patientsByGroup: groups, totalByGroup: totals };
     for (const p of data.patients) {
       if (p.date !== selectedDate) continue;
-      if (p.ohcaClass !== 'OHCA' && p.ohcaClass !== 'Prehospital_ROSC' && p.ohcaClass !== 'Possible_OHCA') continue;
       const g = (p.displayGroup || '新竹') as DisplayGroup;
+      if (!totals[g]) continue;
+      totals[g].all++;
+      if (p.ohcaClass !== 'OHCA' && p.ohcaClass !== 'Prehospital_ROSC' && p.ohcaClass !== 'Possible_OHCA') continue;
       if (groups[g]) groups[g].push(p);
     }
-    return groups;
+    return { patientsByGroup: groups, totalByGroup: totals };
   }, [data, selectedDate]);
 
   // 每院區該日的掃描狀態
@@ -224,6 +231,7 @@ export default function ScreeningDailyPage() {
         <div className="grid gap-6 lg:grid-cols-3">
           {DISPLAY_GROUPS.map(group => {
             const list = patientsByGroup[group];
+            const totals = totalByGroup[group];
             const { status, info } = scanStatusByGroup[group];
             return (
               <Card key={group}>
@@ -235,9 +243,14 @@ export default function ScreeningDailyPage() {
                       {list.length} 人
                     </span>
                   </CardTitle>
-                  {/* 掃描狀態 */}
-                  <div className="mt-2">
+                  {/* 掃描統計 + 狀態 */}
+                  <div className="mt-2 flex items-center gap-3">
                     <ScanStatusBadge status={status} info={info} />
+                    {status !== 'missing' && (
+                      <span className="text-xs text-zinc-400">
+                        1 級共 {totals.all} 人
+                      </span>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="p-0">

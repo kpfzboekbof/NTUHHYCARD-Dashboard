@@ -87,27 +87,36 @@ export async function GET(request: NextRequest) {
     .filter(b => b.pathname.endsWith('.json') && !b.pathname.endsWith('_reviews.json'))
     .sort((a, b) => a.pathname.localeCompare(b.pathname));
 
-  for (const blob of dayBlobs) {
-    const filename = blob.pathname.split('/').pop() || '';
-    const base = filename.replace('.json', '');
-    // 新格式: "2025-06-12__hsinchu"；舊格式: "2025-06-12"
-    let dateStr = base;
-    let siteKey: string | null = null;
-    const sepIdx = base.indexOf('__');
-    if (sepIdx > 0) {
-      dateStr = base.slice(0, sepIdx);
-      siteKey = base.slice(sepIdx + 2);
-    }
-    datesSet.add(dateStr);
+  // 並行讀取所有 blob（之前是 for-await 序列化讀，30 個檔案要 30 趟 round-trip）
+  const blobReads = await Promise.all(
+    dayBlobs.map(async blob => {
+      const filename = blob.pathname.split('/').pop() || '';
+      const base = filename.replace('.json', '');
+      // 新格式: "2025-06-12__hsinchu"；舊格式: "2025-06-12"
+      let dateStr = base;
+      let siteKey: string | null = null;
+      const sepIdx = base.indexOf('__');
+      if (sepIdx > 0) {
+        dateStr = base.slice(0, sepIdx);
+        siteKey = base.slice(sepIdx + 2);
+      }
 
-    const content = await readPrivateJson(blob.pathname) as
-      | {
-          patients?: Record<string, unknown>[];
-          displayGroup?: string;
-          scannedAt?: string;
-          totalEd?: number;
-        }
-      | null;
+      const content = await readPrivateJson(blob.pathname) as
+        | {
+            patients?: Record<string, unknown>[];
+            displayGroup?: string;
+            scannedAt?: string;
+            totalEd?: number;
+          }
+        | null;
+
+      return { dateStr, siteKey, content };
+    })
+  );
+
+  // 序列化合併（順序處理才能正確算 scanMap 的「最新 scannedAt」）
+  for (const { dateStr, siteKey, content } of blobReads) {
+    datesSet.add(dateStr);
     if (!content) continue;
 
     const scannedAt = typeof content.scannedAt === 'string' ? content.scannedAt : null;
@@ -119,7 +128,6 @@ export async function GET(request: NextRequest) {
     const group = groupFromPayload || (siteKey ? SITE_TO_GROUP[siteKey] : null);
     if (group && scanMap[group]) {
       const prev = scanMap[group][dateStr];
-      // 保留較新的 scannedAt（字串比較 ISO 格式有效）
       if (!prev || (scannedAt && (!prev.scannedAt || scannedAt > prev.scannedAt))) {
         scanMap[group][dateStr] = { scannedAt, totalEd };
       }
@@ -136,7 +144,6 @@ export async function GET(request: NextRequest) {
         patient.reviewed = reviews[id].decision;
         patient.reviewedAt = reviews[id].reviewedAt;
       }
-      // 附上病人所屬的掃描日期（給前端按日期分組用）
       patient.date = dateStr;
       allPatients.push(patient);
     }

@@ -10,7 +10,12 @@ export function useScreeningData(month: string) {
   const { data, error, isLoading, isValidating, mutate } = useSWR<ScreeningResponse>(
     `/api/screening?month=${month}`,
     fetcher,
-    { refreshInterval: 60000 } // 1 min auto-refresh
+    {
+      // 5 分鐘自動刷新（scraper 一天最多跑幾次，60s 太頻繁，浪費 blob read）
+      refreshInterval: 5 * 60 * 1000,
+      // 視窗重新獲得焦點時刷新（讓使用者切回 tab 立刻看到最新資料）
+      revalidateOnFocus: true,
+    }
   );
 
   return {

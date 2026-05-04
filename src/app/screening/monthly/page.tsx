@@ -41,9 +41,10 @@ function shouldInclude(p: ScreeningPatient): boolean {
   return false;
 }
 
-/** displayGroup → REDCap hospital 代碼 */
-function hospitalCode(group: ScreeningPatient['displayGroup']): string {
-  switch (group) {
+/** REDCap hospital 代碼：優先用 scraper 算好的 hospitalCode，否則從 displayGroup fallback */
+function hospitalCode(p: ScreeningPatient): string {
+  if (typeof p.hospitalCode === 'number') return String(p.hospitalCode);
+  switch (p.displayGroup) {
     case '總院': return '0';
     case '新竹': return '1';
     case '雲林': return '2';
@@ -112,7 +113,7 @@ export default function ScreeningMonthlyPage() {
     rows.forEach((p, i) => {
       const cells = [
         String(start + i),
-        hospitalCode(p.displayGroup),
+        hospitalCode(p),
         p.chartNo || '',
         p.date || '',
         '', // er_arrival 留空

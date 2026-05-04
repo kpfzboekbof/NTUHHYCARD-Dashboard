@@ -158,6 +158,12 @@ export interface ScreeningPatient {
   birthday: string;
   regDate: string;
   triage: string;
+  /** 急診詢問台「科別」欄（生醫系統用 (竹北)/(竹東) 區分子分院） */
+  department?: string;
+  /** 急診詢問台「診別」欄（雲林分院用 斗六/虎尾 區分子分院） */
+  visitType?: string;
+  /** REDCap hospital 代碼: 0=總院, 1=新竹, 2=雲林未分類, 3=生醫, 4=竹東, 5=斗六, 6=虎尾, 7=其他 */
+  hospitalCode?: number;
   disposition: string;
   lastStatus: string;
   diagnosis: string;

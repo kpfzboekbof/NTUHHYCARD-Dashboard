@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { LogOut, Loader2 } from 'lucide-react';
+import { LogOut, Loader2, Download } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,35 @@ function shouldInclude(p: ScreeningPatient): boolean {
   return false;
 }
 
+/** displayGroup → REDCap hospital 代碼 */
+function hospitalCode(group: ScreeningPatient['displayGroup']): string {
+  switch (group) {
+    case '總院': return '0';
+    case '新竹': return '1';
+    case '雲林': return '2';
+    default: return '';
+  }
+}
+
+/** CSV escape（含逗號、引號、換行時加引號並 double-quote 內部引號） */
+function csvCell(v: string): string {
+  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+  return v;
+}
+
+function downloadCsv(filename: string, content: string) {
+  // 加 BOM 讓 Excel 正確判讀 UTF-8
+  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /* ------------------------------------------------------------------ */
 /* 月報表頁                                                            */
 /* ------------------------------------------------------------------ */
@@ -52,6 +81,7 @@ export default function ScreeningMonthlyPage() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [startStudyId, setStartStudyId] = useState<string>('');
 
   const { data, error, isLoading, refresh } = useScreeningData(month);
 
@@ -66,6 +96,32 @@ export default function ScreeningMonthlyPage() {
     });
     return filtered;
   }, [data]);
+
+  const handleExportRedcap = () => {
+    const start = parseInt(startStudyId, 10);
+    if (!Number.isFinite(start) || start < 1) {
+      alert('請輸入起始 Study ID（整數，REDCap 上目前最大編號 +1）');
+      return;
+    }
+    if (rows.length === 0) {
+      alert('本月沒有可匯出的病人');
+      return;
+    }
+    const header = ['study_id', 'hospital', 'reg_no', 'ed_date', 'er_arrival', 'exclusion'];
+    const lines = [header.join(',')];
+    rows.forEach((p, i) => {
+      const cells = [
+        String(start + i),
+        hospitalCode(p.displayGroup),
+        p.chartNo || '',
+        p.date || '',
+        '', // er_arrival 留空
+        '0', // exclusion: OHCA (不需排除)
+      ].map(csvCell);
+      lines.push(cells.join(','));
+    });
+    downloadCsv(`redcap_ohca_${month}.csv`, lines.join('\n'));
+  };
 
   // 依院區統計
   const countByGroup = useMemo(() => {
@@ -125,6 +181,21 @@ export default function ScreeningMonthlyPage() {
                 更新: {new Date(data.fetchedAt).toLocaleString('zh-TW')}
               </span>
             )}
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-zinc-500">起始 Study ID</label>
+              <input
+                type="number"
+                min={1}
+                placeholder="例: 6933"
+                className="w-24 rounded border px-2 py-1 text-sm"
+                value={startStudyId}
+                onChange={e => setStartStudyId(e.target.value)}
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={handleExportRedcap}>
+              <Download className="mr-1 h-3.5 w-3.5" />
+              匯出 REDCap CSV
+            </Button>
             <Button variant="outline" size="sm" onClick={() => refresh()}>
               重新整理
             </Button>

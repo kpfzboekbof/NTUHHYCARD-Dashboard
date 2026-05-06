@@ -519,7 +519,14 @@ export default function EtiologyPage() {
                           ? 'bg-white shadow text-zinc-900 dark:bg-zinc-700 dark:text-white'
                           : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                       }`}
-                      onClick={() => setViewMode('consensus')}
+                      onClick={() => {
+                        setViewMode('consensus');
+                        // Auto-apply the meeting's ID range so the table only
+                        // shows the cases up for discussion.
+                        setIdFrom(reminderIdFrom);
+                        setIdTo(reminderIdTo);
+                        setPage(0);
+                      }}
                     >
                       共識會議
                     </button>

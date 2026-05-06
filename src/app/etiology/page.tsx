@@ -151,9 +151,10 @@ export default function EtiologyPage() {
   const handleSendReminder = useCallback(async (target: number | 'all') => {
     setSendingReminder(target);
     try {
-      // "all" excludes 陳雲昶 by default
+      // "all" excludes 陳雲昶 by default; sends to everyone with an email so
+      // 0-incomplete labelers still receive the RSVP request.
       const labelerCodes = target === 'all'
-        ? reminderStatus.filter(l => l.name !== '陳雲昶' && l.email && l.incompleteCount > 0).map(l => l.code)
+        ? reminderStatus.filter(l => l.name !== '陳雲昶' && l.email).map(l => l.code)
         : [target];
 
       const res = await fetch('/api/etiology-reminder', {
@@ -363,7 +364,7 @@ export default function EtiologyPage() {
                           {reminderStatus.map(l => {
                             const result = sendResult[l.code];
                             const isSending = sendingReminder === l.code || sendingReminder === 'all';
-                            const canSend = !!l.email && l.incompleteCount > 0 && !!meetingDate;
+                            const canSend = !!l.email && !!meetingDate;
                             return (
                               <tr key={l.code} className="border-b">
                                 <td className="px-3 py-1.5">{l.name}</td>
@@ -426,7 +427,7 @@ export default function EtiologyPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
                       onClick={() => handleSendReminder('all')}
-                      disabled={!!sendingReminder || !meetingDate || reminderStatus.every(l => !l.email || l.incompleteCount === 0)}
+                      disabled={!!sendingReminder || !meetingDate || reminderStatus.every(l => !l.email)}
                       size="sm"
                     >
                       <Mail className="mr-1.5 h-3.5 w-3.5" />

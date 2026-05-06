@@ -166,10 +166,8 @@ export async function POST(request: NextRequest) {
           r => !r.reviewers.find(rev => rev.labelerCode === labeler.code)?.complete,
         );
 
-        if (incompleteCases.length === 0) {
-          results.push({ name: labeler.name, email: labeler.email, count: 0, success: true });
-          continue;
-        }
+        // Send the email even when 0 cases remain — the recipient still needs
+        // the RSVP buttons. The template switches copy based on the count.
 
         const { subject, html } = buildReminderEmail(
           labeler.name,

@@ -5,7 +5,7 @@ import { useEtiologyData } from '@/hooks/use-etiology-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Lock, Unlock, Mail, Calendar, AlertTriangle } from 'lucide-react';
+import { Lock, Unlock, Mail, Calendar, AlertTriangle, Check, X, HelpCircle } from 'lucide-react';
 import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
 import type { ConsensusStatus } from '@/lib/redcap/etiology-transform';
 
@@ -56,6 +56,7 @@ export default function EtiologyPage() {
   const [reminderSentAt, setReminderSentAt] = useState<string | null>(null);
   const [reminderStatus, setReminderStatus] = useState<Array<{
     code: number; name: string; email: string | null; incompleteCount: number;
+    rsvp: { response: 'yes' | 'no'; respondedAt: string } | null;
   }>>([]);
   const [reminderLoading, setReminderLoading] = useState(false);
   const [sendingReminder, setSendingReminder] = useState<number | 'all' | false>(false);
@@ -150,9 +151,10 @@ export default function EtiologyPage() {
   const handleSendReminder = useCallback(async (target: number | 'all') => {
     setSendingReminder(target);
     try {
-      // "all" excludes 陳雲昶 by default
+      // "all" excludes 陳雲昶 by default; sends to everyone with an email so
+      // 0-incomplete labelers still receive the RSVP request.
       const labelerCodes = target === 'all'
-        ? reminderStatus.filter(l => l.name !== '陳雲昶' && l.email && l.incompleteCount > 0).map(l => l.code)
+        ? reminderStatus.filter(l => l.name !== '陳雲昶' && l.email).map(l => l.code)
         : [target];
 
       const res = await fetch('/api/etiology-reminder', {
@@ -328,12 +330,33 @@ export default function EtiologyPage() {
 
                   {/* Labeler incomplete summary with individual send buttons */}
                   {!reminderLoading && reminderStatus.length > 0 && (
-                    <div className="overflow-auto">
+                    <>
+                      {(() => {
+                        const yesCount = reminderStatus.filter(l => l.rsvp?.response === 'yes').length;
+                        const noCount = reminderStatus.filter(l => l.rsvp?.response === 'no').length;
+                        const pendingCount = reminderStatus.length - yesCount - noCount;
+                        return (
+                          <div className="flex flex-wrap items-center gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/40">
+                            <span className="font-medium text-zinc-600 dark:text-zinc-400">下次共識會議出席統計：</span>
+                            <span className="flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" /> 出席 {yesCount}
+                            </span>
+                            <span className="flex items-center gap-1 text-red-600">
+                              <X className="h-3 w-3" /> 不出席 {noCount}
+                            </span>
+                            <span className="flex items-center gap-1 text-zinc-500">
+                              <HelpCircle className="h-3 w-3" /> 未回覆 {pendingCount}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                      <div className="overflow-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b text-left text-zinc-500">
                             <th className="px-3 py-2">Labeler</th>
                             <th className="px-3 py-2 text-center">未完成數</th>
+                            <th className="px-3 py-2 text-center">出席 RSVP</th>
                             <th className="px-3 py-2 text-center">發送提醒</th>
                           </tr>
                         </thead>
@@ -341,7 +364,7 @@ export default function EtiologyPage() {
                           {reminderStatus.map(l => {
                             const result = sendResult[l.code];
                             const isSending = sendingReminder === l.code || sendingReminder === 'all';
-                            const canSend = !!l.email && l.incompleteCount > 0 && !!meetingDate;
+                            const canSend = !!l.email && !!meetingDate;
                             return (
                               <tr key={l.code} className="border-b">
                                 <td className="px-3 py-1.5">{l.name}</td>
@@ -350,6 +373,26 @@ export default function EtiologyPage() {
                                     <span className="font-medium text-amber-600">{l.incompleteCount}</span>
                                   ) : (
                                     <span className="text-green-600">0</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {l.rsvp ? (
+                                    <span
+                                      className={
+                                        l.rsvp.response === 'yes'
+                                          ? 'inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                                          : 'inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                                      }
+                                      title={`回覆於 ${new Date(l.rsvp.respondedAt).toLocaleString('zh-TW')}`}
+                                    >
+                                      {l.rsvp.response === 'yes' ? (
+                                        <><Check className="h-3 w-3" /> 出席</>
+                                      ) : (
+                                        <><X className="h-3 w-3" /> 不出席</>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-zinc-400">— 未回覆</span>
                                   )}
                                 </td>
                                 <td className="px-3 py-1.5 text-center">
@@ -377,13 +420,14 @@ export default function EtiologyPage() {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
 
                   {/* Send all + status */}
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
                       onClick={() => handleSendReminder('all')}
-                      disabled={!!sendingReminder || !meetingDate || reminderStatus.every(l => !l.email || l.incompleteCount === 0)}
+                      disabled={!!sendingReminder || !meetingDate || reminderStatus.every(l => !l.email)}
                       size="sm"
                     >
                       <Mail className="mr-1.5 h-3.5 w-3.5" />

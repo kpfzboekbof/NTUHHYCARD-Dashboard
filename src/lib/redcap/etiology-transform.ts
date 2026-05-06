@@ -46,6 +46,48 @@ export function causeCodeToFinalCode(causeCode: string | null): number | null {
   return CAUSE_TO_FINAL[causeCode] ?? null;
 }
 
+/**
+ * Human-readable label for each labeler-vote causeCode, ordered for the
+ * consensus-meeting reference panel. Grouped by main category so the reader
+ * can scan along a row.
+ */
+export const CAUSE_CODE_GROUPS: Array<{
+  main: string;            // displayed main-category number, e.g. "0", "1", "2"
+  title: string;           // category name, e.g. "Medical", "Traumatic"
+  items: Array<{ code: string; label: string }>;
+}> = [
+  {
+    main: '0', title: 'Medical', items: [
+      { code: '0-0', label: 'presumed cardiac' },
+      { code: '0-1', label: 'anaphylaxis' },
+      { code: '0-2', label: 'respiratory' },
+      { code: '0-3', label: 'terminal illness' },
+      { code: '0-4', label: 'SUID' },
+      { code: '0-5', label: 'other medical' },
+      { code: '0-6', label: 'unknown' },
+    ],
+  },
+  {
+    main: '1', title: 'Traumatic', items: [
+      { code: '1-0', label: 'blunt' },
+      { code: '1-1', label: 'penetrating' },
+      { code: '1-2', label: 'burn injury' },
+      { code: '1-3', label: 'others' },
+    ],
+  },
+  { main: '2', title: 'Drug overdose', items: [{ code: '2', label: 'drug overdose' }] },
+  { main: '3', title: 'Drowning',      items: [{ code: '3', label: 'drowning' }] },
+  { main: '4', title: 'Electrocution', items: [{ code: '4', label: 'electrocution' }] },
+  {
+    main: '5', title: 'Asphyxial', items: [
+      { code: '5-0', label: 'foreign-body airway obstruction' },
+      { code: '5-1', label: 'hanging' },
+      { code: '5-2', label: 'suffocation / strangulation' },
+      { code: '5-3', label: 'others' },
+    ],
+  },
+];
+
 export type ConsensusStatus = 'yellow' | 'green' | 'red';
 
 export interface EtiologyReviewer {

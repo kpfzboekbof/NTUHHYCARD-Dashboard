@@ -6,7 +6,7 @@ import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Lock, Unlock, Mail, Calendar, AlertTriangle, Check, X, HelpCircle, Upload, Sparkles } from 'lucide-react';
-import { ETIOLOGY_FINAL_MAP, causeCodeToFinalCode } from '@/lib/redcap/etiology-transform';
+import { ETIOLOGY_FINAL_MAP, CAUSE_CODE_GROUPS, causeCodeToFinalCode } from '@/lib/redcap/etiology-transform';
 import type { ConsensusStatus, EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
@@ -627,6 +627,31 @@ export default function EtiologyPage() {
                       <span className="ml-auto text-zinc-500">
                         綠色已共識的記錄已隱藏（共 {greenForBatch.withMapping.length + greenForBatch.withoutMapping.length} 筆）
                       </span>
+                    </div>
+
+                    {/* Cause code reference — fixed above the table for quick lookup during the meeting */}
+                    <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                        死因代號對照表 (cause_all_etiology_new / sub)
+                      </p>
+                      <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {CAUSE_CODE_GROUPS.map(group => (
+                          <div key={group.main}>
+                            <p className="mb-1 text-sm font-semibold">
+                              <span className="font-mono text-emerald-700 dark:text-emerald-400">{group.main}</span>
+                              <span className="ml-2">{group.title}</span>
+                            </p>
+                            <ul className="space-y-0.5">
+                              {group.items.map(it => (
+                                <li key={it.code} className="flex gap-2 text-sm leading-tight">
+                                  <span className="w-12 shrink-0 font-mono font-semibold text-emerald-700 dark:text-emerald-400">{it.code}</span>
+                                  <span className="text-zinc-700 dark:text-zinc-300">{it.label}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

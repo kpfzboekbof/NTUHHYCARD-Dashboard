@@ -5,13 +5,13 @@ export interface Labeler {
 }
 
 export const ETIOLOGY_FINAL_MAP: Record<number, string> = {
-  0: 'Presumed cardiac/unknown',
-  1: 'Anaphylaxis',
-  2: 'Respiratory',
-  3: 'Terminal illness',
-  4: 'SUID',
-  5: 'Other medical',
-  6: 'Unknown',
+  0: 'Medical: Presumed cardiac/unknown',
+  1: 'Medical: Anaphylaxis',
+  2: 'Medical: Respiratory',
+  3: 'Medical: Terminal illness',
+  4: 'Medical: SUID',
+  5: 'Medical: Other medical',
+  6: 'Medical: Unknown',
   7: 'Trauma: Penetrating',
   8: 'Trauma: Blunt',
   9: 'Trauma: Burn',
@@ -20,9 +20,31 @@ export const ETIOLOGY_FINAL_MAP: Record<number, string> = {
   12: 'Electrocution',
   13: 'Asphyxial: Hanging',
   14: 'Asphyxial: Foreign body',
-  15: 'Asphyxial: Suffocation/strangulation',
+  15: 'Asphyxial: Suffocation or strangulation',
   16: 'Asphyxial: Others',
 };
+
+/**
+ * Map a consensus causeCode (output of computeCauseCode) to the etiology_final
+ * integer code. Returns null when there is no direct 1:1 mapping (e.g. trauma
+ * "others" 1-3, or any unexpected sub-category) — in those cases the consensus
+ * meeting will need to choose etiology_final manually.
+ */
+const CAUSE_TO_FINAL: Record<string, number> = {
+  // cause_all = 0 (Medical), cause_med
+  '0-0': 0, '0-1': 1, '0-2': 2, '0-3': 3, '0-4': 4, '0-5': 5, '0-6': 6,
+  // cause_all = 1 (Traumatic), cause_tra: 0=blunt, 1=penetrating, 2=burn, 3=others
+  '1-0': 8, '1-1': 7, '1-2': 9,
+  // cause_all = 2/3/4 (no sub)
+  '2': 10, '3': 11, '4': 12,
+  // cause_all = 5 (Asphyxial), cause_asphy: 0=foreign body, 1=hanging, 2=suffocation, 3=others
+  '5-0': 14, '5-1': 13, '5-2': 15, '5-3': 16,
+};
+
+export function causeCodeToFinalCode(causeCode: string | null): number | null {
+  if (!causeCode) return null;
+  return CAUSE_TO_FINAL[causeCode] ?? null;
+}
 
 export type ConsensusStatus = 'yellow' | 'green' | 'red';
 
@@ -35,11 +57,14 @@ export interface EtiologyReviewer {
 
 export interface EtiologyRecord {
   studyId: string;
+  regNo: string;                       // 病歷號 (REDCap field: reg_no)
   finalCode: number | null;
   finalLabel: string | null;
   reviewers: EtiologyReviewer[];
   consensusStatus: ConsensusStatus;
   completedCount: number;
+  /** Majority causeCode among completed reviewers when the row is "green"; null otherwise. */
+  consensusCauseCode: string | null;
 }
 
 export interface EtiologyStats {
@@ -87,12 +112,15 @@ function computeCauseCode(row: Record<string, string>): string | null {
   return main; // subcategory not yet filled
 }
 
-/** Determine consensus status from completed reviewers' cause codes */
-function computeConsensusStatus(reviewers: EtiologyReviewer[]): ConsensusStatus {
+/** Determine consensus status + majority causeCode (when green) */
+function computeConsensus(reviewers: EtiologyReviewer[]): {
+  status: ConsensusStatus;
+  majorityCauseCode: string | null;
+} {
   const completed = reviewers.filter(r => r.complete && r.causeCode !== null);
   const total = completed.length;
 
-  if (total < 3) return 'yellow';
+  if (total < 3) return { status: 'yellow', majorityCauseCode: null };
 
   // Count votes by full causeCode
   const votes = new Map<string, number>();
@@ -101,16 +129,20 @@ function computeConsensusStatus(reviewers: EtiologyReviewer[]): ConsensusStatus 
   }
 
   let maxCount = 0;
-  for (const count of votes.values()) {
-    if (count > maxCount) maxCount = count;
+  let majority: string | null = null;
+  for (const [code, count] of votes) {
+    if (count > maxCount) {
+      maxCount = count;
+      majority = code;
+    }
   }
   const minorityCount = total - maxCount;
 
   // Green: unanimous (3:0, 4:0, 5:0) or one dissenter with majority ≥ 3 (3:1, 4:1)
-  if (minorityCount === 0) return 'green';
-  if (minorityCount === 1 && maxCount >= 3) return 'green';
+  if (minorityCount === 0) return { status: 'green', majorityCauseCode: majority };
+  if (minorityCount === 1 && maxCount >= 3) return { status: 'green', majorityCauseCode: majority };
 
-  return 'red';
+  return { status: 'red', majorityCauseCode: null };
 }
 
 export function transformEtiology(rawRows: Record<string, string>[], labelers: Labeler[]): {
@@ -126,6 +158,7 @@ export function transformEtiology(rawRows: Record<string, string>[], labelers: L
   }
 
   const map = new Map<string, {
+    regNo: string;
     finalCode: number | null;
     completedLabelers: Set<number>;
     labelerCauseCodes: Map<number, string | null>;
@@ -137,17 +170,20 @@ export function transformEtiology(rawRows: Record<string, string>[], labelers: L
 
     let entry = map.get(id);
     if (!entry) {
-      entry = { finalCode: null, completedLabelers: new Set(), labelerCauseCodes: new Map() };
+      entry = { regNo: '', finalCode: null, completedLabelers: new Set(), labelerCauseCodes: new Map() };
       map.set(id, entry);
     }
 
     const isRepeat = row.redcap_repeat_instrument === 'ntuh_nhi_etiology';
 
     if (!isRepeat) {
-      // Main row — read etiology_final
+      // Main row — read etiology_final + reg_no (病歷號)
       const finalVal = row.etiology_final;
       if (finalVal !== undefined && finalVal !== '') {
         entry.finalCode = parseInt(finalVal);
+      }
+      if (row.reg_no !== undefined && row.reg_no !== '') {
+        entry.regNo = row.reg_no;
       }
     } else {
       // Repeat row — read labeler + complete status + cause code
@@ -172,13 +208,17 @@ export function transformEtiology(rawRows: Record<string, string>[], labelers: L
       causeCode: entry.labelerCauseCodes.get(l.code) ?? null,
     }));
 
+    const { status, majorityCauseCode } = computeConsensus(reviewersList);
+
     records.push({
       studyId,
+      regNo: entry.regNo,
       finalCode: entry.finalCode,
       finalLabel: entry.finalCode !== null ? (ETIOLOGY_FINAL_MAP[entry.finalCode] ?? `Code ${entry.finalCode}`) : null,
       reviewers: reviewersList,
-      consensusStatus: computeConsensusStatus(reviewersList),
+      consensusStatus: status,
       completedCount: entry.completedLabelers.size,
+      consensusCauseCode: majorityCauseCode,
     });
   }
 

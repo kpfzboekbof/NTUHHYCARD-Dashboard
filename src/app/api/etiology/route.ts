@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchEtiologyStatus, importEtiologyFinal } from '@/lib/redcap/client';
+import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
@@ -60,6 +60,22 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+
+    // Batch mode — used by the consensus meeting "auto-fill green" flow.
+    if (Array.isArray(body.updates)) {
+      const updates = body.updates as Array<{ studyId: string; code: number }>;
+      const cleaned = updates.filter(
+        u => typeof u?.studyId === 'string' && u.studyId !== '' && Number.isInteger(u?.code),
+      );
+      if (cleaned.length === 0) {
+        return NextResponse.json({ error: 'updates 為空或格式不正確' }, { status: 400 });
+      }
+      const records = cleaned.map(u => ({ study_id: u.studyId, etiology_final: String(u.code) }));
+      const count = await batchImportField(records);
+      clearAllCache();
+      return NextResponse.json({ ok: true, count });
+    }
+
     const { studyId, code } = body as { studyId?: string; code?: number };
     if (!studyId || code === undefined || code === null) {
       return NextResponse.json({ error: '缺少 studyId 或 code 參數' }, { status: 400 });

@@ -5,9 +5,9 @@ import { useEtiologyData } from '@/hooks/use-etiology-data';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Lock, Unlock, Mail, Calendar, AlertTriangle, Check, X, HelpCircle } from 'lucide-react';
-import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
-import type { ConsensusStatus } from '@/lib/redcap/etiology-transform';
+import { Lock, Unlock, Mail, Calendar, AlertTriangle, Check, X, HelpCircle, Upload, Sparkles } from 'lucide-react';
+import { ETIOLOGY_FINAL_MAP, causeCodeToFinalCode } from '@/lib/redcap/etiology-transform';
+import type { ConsensusStatus, EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
 
@@ -48,6 +48,10 @@ export default function EtiologyPage() {
 
   // Per-row save state: studyId → 'saving' | 'error'
   const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
+
+  // Consensus meeting batch upload (auto-fill green records + push to REDCap)
+  const [showBatchPreview, setShowBatchPreview] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
 
   // Reminder state
   const [meetingDate, setMeetingDate] = useState('');
@@ -227,8 +231,62 @@ export default function EtiologyPage() {
     return result;
   }, [data, search, idFrom, idTo]);
 
-  const pageRows = incompleteRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const totalPages = Math.ceil(incompleteRecords.length / PAGE_SIZE);
+  // In consensus meeting mode we hide already-consensus (green) rows — they're
+  // handled in bulk by the "帶入並上傳" action below.
+  const visibleRecords = useMemo(
+    () => viewMode === 'consensus'
+      ? incompleteRecords.filter(r => r.consensusStatus !== 'green')
+      : incompleteRecords,
+    [viewMode, incompleteRecords],
+  );
+
+  // Green records inside the current ID range, split by whether their majority
+  // causeCode has a 1:1 mapping to etiology_final.
+  const greenForBatch = useMemo(() => {
+    const withMapping: Array<{ record: EtiologyRecord; mappedCode: number; label: string }> = [];
+    const withoutMapping: EtiologyRecord[] = [];
+    for (const r of incompleteRecords) {
+      if (r.consensusStatus !== 'green') continue;
+      const mapped = causeCodeToFinalCode(r.consensusCauseCode);
+      if (mapped !== null) {
+        withMapping.push({ record: r, mappedCode: mapped, label: ETIOLOGY_FINAL_MAP[mapped] });
+      } else {
+        withoutMapping.push(r);
+      }
+    }
+    return { withMapping, withoutMapping };
+  }, [incompleteRecords]);
+
+  const handleBatchApply = useCallback(async () => {
+    if (greenForBatch.withMapping.length === 0) return;
+    setBatchUpdating(true);
+    try {
+      const updates = greenForBatch.withMapping.map(({ record, mappedCode }) => ({
+        studyId: record.studyId,
+        code: mappedCode,
+      }));
+      const res = await fetch('/api/etiology', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        alert(d.error || '上傳失敗');
+        return;
+      }
+      refresh();
+      setShowBatchPreview(false);
+      alert(`已上傳 ${d.count ?? updates.length} 筆共識結果到 REDCap`);
+    } catch {
+      alert('網路錯誤，請稍後再試');
+    } finally {
+      setBatchUpdating(false);
+    }
+  }, [greenForBatch, refresh]);
+
+  const pageRows = visibleRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(visibleRecords.length / PAGE_SIZE);
 
   const stats = data?.stats;
 
@@ -450,7 +508,7 @@ export default function EtiologyPage() {
                   <CardTitle className="mr-auto">
                     尚未完成 etiology_final 的記錄
                     <span className="ml-2 text-sm font-normal text-zinc-500">
-                      ({incompleteRecords.length.toLocaleString()} 筆)
+                      ({visibleRecords.length.toLocaleString()} 筆)
                     </span>
                   </CardTitle>
 
@@ -534,26 +592,53 @@ export default function EtiologyPage() {
                 )}
               </CardHeader>
               <CardContent>
-                {/* Legend for consensus mode */}
+                {/* Consensus meeting action bar + legend */}
                 {viewMode === 'consensus' && (
-                  <div className="mb-3 flex flex-wrap gap-3 text-xs">
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-3 w-3 rounded bg-green-200 dark:bg-green-800" /> 已達共識（3:0, 4:0, 5:0, 3:1, 4:1）
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-3 w-3 rounded bg-red-200 dark:bg-red-800" /> 需要共識討論
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-3 w-3 rounded bg-yellow-200 dark:bg-yellow-800" /> 票數不足（&lt;3），無法進入共識
-                    </span>
+                  <div className="mb-4 space-y-3">
+                    {adminMode && (
+                      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+                        <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                        <div className="flex-1 min-w-[200px]">
+                          <p className="text-sm font-semibold">會後一鍵帶入綠色共識結果</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                            目前 ID 範圍內可帶入 <strong className="text-emerald-700 dark:text-emerald-300">{greenForBatch.withMapping.length}</strong> 筆
+                            {greenForBatch.withoutMapping.length > 0 && (
+                              <>，另有 <strong className="text-amber-700 dark:text-amber-300">{greenForBatch.withoutMapping.length}</strong> 筆綠色但無對照（需手動）</>
+                            )}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => setShowBatchPreview(true)}
+                          disabled={greenForBatch.withMapping.length === 0 || batchUpdating}
+                        >
+                          <Upload className="mr-1.5 h-3.5 w-3.5" />
+                          帶入並上傳 REDCap
+                        </Button>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-3 w-3 rounded bg-red-200 dark:bg-red-800" /> 需要共識討論
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block h-3 w-3 rounded bg-yellow-200 dark:bg-yellow-800" /> 票數不足（&lt;3），無法進入共識
+                      </span>
+                      <span className="ml-auto text-zinc-500">
+                        綠色已共識的記錄已隱藏（共 {greenForBatch.withMapping.length + greenForBatch.withoutMapping.length} 筆）
+                      </span>
+                    </div>
                   </div>
                 )}
 
                 <div className="overflow-auto">
-                  <table className="w-full text-sm">
+                  <table className={`w-full ${viewMode === 'consensus' ? 'text-lg' : 'text-sm'}`}>
                     <thead>
-                      <tr className="border-b text-left text-zinc-500">
+                      <tr className={`border-b text-left text-zinc-500 ${viewMode === 'consensus' ? 'text-base' : ''}`}>
                         <th className="px-3 py-2 sticky left-0 bg-white dark:bg-zinc-950 z-10">Study ID</th>
+                        {viewMode === 'consensus' && (
+                          <th className="px-3 py-2 whitespace-nowrap">病歷號</th>
+                        )}
                         {labelers.map(l => (
                           <th key={l.code} className="px-2 py-2 text-center whitespace-nowrap">{l.name}</th>
                         ))}
@@ -593,20 +678,27 @@ export default function EtiologyPage() {
                         return (
                           <tr key={r.studyId} className={`border-b transition-colors ${rowBg}`}>
                             <td
-                              className={`px-3 py-1.5 font-mono text-xs sticky left-0 z-10 cursor-pointer hover:underline text-blue-600 ${stickyBg}`}
+                              className={`px-3 py-1.5 font-mono sticky left-0 z-10 cursor-pointer hover:underline text-blue-600 ${stickyBg} ${isConsensus ? 'text-lg font-semibold' : 'text-xs'}`}
                               onClick={() => {
                                 setLastVisited(r.studyId);
                                 window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank');
                               }}
                             >{r.studyId}</td>
 
+                            {/* 病歷號 column (consensus mode only) */}
+                            {isConsensus && (
+                              <td className="px-3 py-1.5 font-mono text-lg font-semibold whitespace-nowrap">
+                                {r.regNo || <span className="text-zinc-300">—</span>}
+                              </td>
+                            )}
+
                             {/* Reviewer columns */}
                             {r.reviewers.map(rev => (
                               <td key={rev.labelerCode} className="px-2 py-1.5 text-center">
                                 {isConsensus ? (
-                                  // Consensus mode: show cause code
+                                  // Consensus mode: show cause code, large for projection
                                   rev.causeCode !== null ? (
-                                    <span className="font-mono text-xs font-medium">{rev.causeCode}</span>
+                                    <span className="font-mono text-lg font-semibold">{rev.causeCode}</span>
                                   ) : (
                                     <span className="text-zinc-300">—</span>
                                   )
@@ -623,7 +715,7 @@ export default function EtiologyPage() {
 
                             {/* Vote count column (consensus only) */}
                             {isConsensus && (
-                              <td className="px-2 py-1.5 text-center text-xs text-zinc-500">
+                              <td className="px-2 py-1.5 text-center text-base text-zinc-500">
                                 {r.completedCount}
                               </td>
                             )}
@@ -661,8 +753,10 @@ export default function EtiologyPage() {
                       })}
                       {pageRows.length === 0 && (
                         <tr>
-                          <td colSpan={2 + labelers.length + (viewMode === 'consensus' ? 1 : 0)} className="px-3 py-8 text-center text-zinc-400">
-                            {search ? '無符合的記錄' : '所有記錄皆已完成共識'}
+                          <td colSpan={2 + labelers.length + (viewMode === 'consensus' ? 2 : 0)} className="px-3 py-8 text-center text-zinc-400">
+                            {viewMode === 'consensus'
+                              ? '此 ID 範圍內沒有需要討論的記錄'
+                              : (search ? '無符合的記錄' : '所有記錄皆已完成共識')}
                           </td>
                         </tr>
                       )}
@@ -672,7 +766,7 @@ export default function EtiologyPage() {
                 {totalPages > 1 && (
                   <div className="mt-4 flex items-center justify-between text-sm">
                     <span className="text-zinc-500">
-                      第 {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, incompleteRecords.length)} / {incompleteRecords.length} 筆
+                      第 {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, visibleRecords.length)} / {visibleRecords.length} 筆
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -697,6 +791,79 @@ export default function EtiologyPage() {
           </>
         )}
       </div>
+
+      {/* Batch upload preview modal */}
+      {showBatchPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={e => { if (e.target === e.currentTarget && !batchUpdating) setShowBatchPreview(false); }}
+        >
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl dark:bg-zinc-900">
+            <div className="border-b p-5">
+              <h3 className="flex items-center gap-2 text-lg font-semibold">
+                <Upload className="h-5 w-5" />
+                確認帶入並上傳 REDCap
+              </h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                以下 {greenForBatch.withMapping.length} 筆綠色共識結果將寫入 REDCap 的 etiology_final 欄位。請再次確認後執行。
+              </p>
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-zinc-500">
+                    <th className="px-2 py-2">Study ID</th>
+                    <th className="px-2 py-2">病歷號</th>
+                    <th className="px-2 py-2">共識 cause</th>
+                    <th className="px-2 py-2">→ etiology_final</th>
+                    <th className="px-2 py-2">中文</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {greenForBatch.withMapping.map(({ record, mappedCode, label }) => (
+                    <tr key={record.studyId} className="border-b">
+                      <td className="px-2 py-1.5 font-mono text-xs">{record.studyId}</td>
+                      <td className="px-2 py-1.5 font-mono text-xs">{record.regNo || '—'}</td>
+                      <td className="px-2 py-1.5 font-mono text-xs">{record.consensusCauseCode}</td>
+                      <td className="px-2 py-1.5 text-center font-semibold">{mappedCode}</td>
+                      <td className="px-2 py-1.5 text-xs">{label}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {greenForBatch.withoutMapping.length > 0 && (
+                <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  <p className="font-semibold">以下 {greenForBatch.withoutMapping.length} 筆無 1:1 對照（不會被自動帶入，請手動處理）：</p>
+                  <ul className="mt-1 space-y-0.5 font-mono">
+                    {greenForBatch.withoutMapping.map(r => (
+                      <li key={r.studyId}>
+                        {r.studyId}{r.regNo ? ` (${r.regNo})` : ''} — cause {r.consensusCauseCode}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowBatchPreview(false)}
+                disabled={batchUpdating}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleBatchApply}
+                disabled={batchUpdating || greenForBatch.withMapping.length === 0}
+              >
+                {batchUpdating ? '上傳中...' : `確認上傳 ${greenForBatch.withMapping.length} 筆`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Admin login modal */}
       {showLoginModal && (

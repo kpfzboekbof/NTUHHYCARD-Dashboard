@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import * as nodemailer from 'nodemailer';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import { getMeetingSettings, setMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
+import { signRsvp } from '@/lib/rsvp-token';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 function generateAdminToken(): string {
@@ -46,6 +47,23 @@ function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo:
   return result;
 }
 
+/** Resolve the public base URL used to build links inside emails. */
+async function resolveBaseUrl(): Promise<string> {
+  const explicit = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_BASE_URL;
+  if (explicit) return explicit.replace(/\/$/, '');
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel.replace(/\/$/, '')}`;
+  // Fall back to the inbound request's host so dev and self-hosted setups
+  // still produce a clickable link.
+  try {
+    const h = await headers();
+    const host = h.get('x-forwarded-host') || h.get('host');
+    const proto = h.get('x-forwarded-proto') || 'http';
+    if (host) return `${proto}://${host}`;
+  } catch {}
+  return 'http://localhost:3000';
+}
+
 /** GET — reminder status: per-labeler incomplete counts + meeting settings */
 export async function GET() {
   try {
@@ -62,12 +80,19 @@ export async function GET() {
       const incompleteCases = incompleteRecords.filter(
         r => !r.reviewers.find(rev => rev.labelerCode === l.code)?.complete,
       );
+      // Only surface RSVPs that match the currently configured meeting date —
+      // a stale entry from a previous meeting should appear as "no response".
+      const stored = settings.rsvps[String(l.code)];
+      const rsvp = stored && settings.meetingDate && stored.meetingDate === settings.meetingDate
+        ? { response: stored.response, respondedAt: stored.respondedAt }
+        : null;
       return {
         code: l.code,
         name: l.name,
         email: l.email || null,
         incompleteCount: incompleteCases.length,
         incompleteCaseIds: incompleteCases.map(r => r.studyId),
+        rsvp,
       };
     });
 
@@ -126,6 +151,8 @@ export async function POST(request: NextRequest) {
       const { records } = transformEtiology(rawRows, labelers);
       const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
+      const baseUrl = await resolveBaseUrl();
+
       // Optional: only send to specific labeler codes
       const targetCodes: number[] | undefined = body.labelerCodes;
 
@@ -149,6 +176,11 @@ export async function POST(request: NextRequest) {
           settings.meetingDate,
           incompleteCases.map(r => r.studyId),
           { from: settings.idFrom, to: settings.idTo },
+          {
+            baseUrl,
+            labelerCode: labeler.code,
+            signature: signRsvp(labeler.code, settings.meetingDate),
+          },
         );
 
         try {

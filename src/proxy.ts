@@ -41,10 +41,11 @@ export const config = {
   //  - /login                      (the login page itself)
   //  - /api/user-auth              (the endpoint the login page POSTs to)
   //  - /api/screening/upload       (scraper uploads via Bearer token, not cookie)
+  //  - /api/rsvp                   (one-click RSVP from email; uses signed token)
   //  - /_next/static, /_next/image (build assets)
   //  - /favicon.ico                (icon)
   //  - any file with an extension  (images, fonts, etc. in /public)
   matcher: [
-    '/((?!login|api/user-auth|api/screening/upload|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
+    '/((?!login|api/user-auth|api/screening/upload|api/rsvp|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
   ],
 };

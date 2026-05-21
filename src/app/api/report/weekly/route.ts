@@ -35,6 +35,10 @@ export const dynamic = 'force-dynamic';
 
 const STALE_DAYS_DEFAULT = 14;
 const WEEK_DAYS = 7;
+// Mirrors UNASSIGNED in lib/redcap/transform.ts — the catch-all bucket for forms
+// with no assigned owner. It is not a person, so it is kept out of `members`
+// and `exceptions` (you cannot nudge it) and surfaced separately as `unassigned`.
+const UNASSIGNED = '未指派';
 
 export async function GET(request: NextRequest) {
   // Token 認證（排程機器用 API token，不是 cookie）
@@ -80,8 +84,13 @@ export async function GET(request: NextRequest) {
     const logs = transformLogs(rawLogs);
     const stats = calcLoggingStats(logs, completionRows, months, assignments, users, targetIds);
 
+    // 「未指派」是無負責人的表單集合，不是成員 —— 抽出來單獨呈現，不混進名單與異常
+    const unassigned = stats.byOwner.find(m => m.owner === UNASSIGNED) ?? null;
+
     // 依完成率由高到低排序，落後者沉底
-    const members = [...stats.byOwner].sort((a, b) => b.pctComplete - a.pctComplete);
+    const members = stats.byOwner
+      .filter(m => m.owner !== UNASSIGNED)
+      .sort((a, b) => b.pctComplete - a.pctComplete);
 
     const isNoEntryThisWeek = (m: OwnerProductivity) =>
       m.daysSince === null || m.daysSince >= WEEK_DAYS;
@@ -99,6 +108,7 @@ export async function GET(request: NextRequest) {
       periodMonths: months,
       thresholds: { staleDays, weekDays: WEEK_DAYS },
       members,
+      unassigned,
       exceptions,
     });
   } catch (error) {

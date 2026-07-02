@@ -32,9 +32,14 @@ export function useAdminAuth(): AdminAuthState {
   const [authLoading, setAuthLoading] = useState(false);
   const otpInputRef = useRef<HTMLInputElement>(null);
 
-  // Check auth on mount
+  // Check auth on mount. On any failure fall back to "not authenticated" —
+  // leaving `authenticated` at null would keep the page stuck on the
+  // 「驗證中...」 screen forever.
   useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(d.authenticated));
+    fetch('/api/auth')
+      .then(r => r.json())
+      .then(d => setAuthenticated(!!d.authenticated))
+      .catch(() => setAuthenticated(false));
   }, []);
 
   // OTP countdown timer
@@ -57,6 +62,7 @@ export function useAdminAuth(): AdminAuthState {
   }, [otpRequired]);
 
   const handleLogin = useCallback(async () => {
+    if (authLoading || !password) return;
     setAuthLoading(true);
     setAuthError('');
     try {
@@ -77,12 +83,15 @@ export function useAdminAuth(): AdminAuthState {
       } else {
         setAuthError(data.error || '登入失敗');
       }
+    } catch {
+      setAuthError('連線失敗，請再試一次');
     } finally {
       setAuthLoading(false);
     }
-  }, [password]);
+  }, [password, authLoading]);
 
   const handleVerifyOtp = useCallback(async () => {
+    if (authLoading || otp.length !== 6) return;
     setAuthLoading(true);
     setAuthError('');
     try {
@@ -99,16 +108,24 @@ export function useAdminAuth(): AdminAuthState {
       } else {
         setAuthError(data.error || '驗證失敗');
       }
+    } catch {
+      setAuthError('連線失敗，請再試一次');
     } finally {
       setAuthLoading(false);
     }
-  }, [otp]);
+  }, [otp, authLoading]);
 
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
-    setAuthenticated(false);
-    setOtpRequired(false);
-    setOtp('');
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } catch {
+      // Even if the request fails, reset local state so the UI returns
+      // to the login screen instead of appearing stuck.
+    } finally {
+      setAuthenticated(false);
+      setOtpRequired(false);
+      setOtp('');
+    }
   }, []);
 
   const handleBackToPassword = useCallback(() => {

@@ -34,23 +34,29 @@ export function AdminLoginCard({ auth }: AdminLoginCardProps) {
       </CardHeader>
       <CardContent>
         {!otpRequired ? (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={e => { e.preventDefault(); handleLogin(); }}
+          >
             <input
               type="password"
-              className="w-full rounded border px-3 py-2 text-sm"
+              className="w-full rounded border px-3 py-2 text-sm disabled:opacity-50"
               placeholder="請輸入管理員密碼"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              disabled={authLoading}
               autoFocus
             />
             {authError && <p className="text-sm text-red-500">{authError}</p>}
-            <Button className="w-full" onClick={handleLogin} disabled={authLoading || !password}>
+            <Button type="submit" className="w-full" disabled={authLoading || !password}>
               {authLoading ? '驗證中...' : '登入'}
             </Button>
-          </div>
+          </form>
         ) : (
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={e => { e.preventDefault(); handleVerifyOtp(); }}
+          >
             <p className="text-sm text-zinc-500">
               驗證碼已寄至 <span className="font-medium text-zinc-700">{otpEmail}</span>
             </p>
@@ -59,18 +65,19 @@ export function AdminLoginCard({ auth }: AdminLoginCardProps) {
               type="text"
               inputMode="numeric"
               maxLength={6}
-              className="w-full rounded border px-3 py-2 text-center text-lg font-bold tracking-[0.5em]"
+              className="w-full rounded border px-3 py-2 text-center text-lg font-bold tracking-[0.5em] disabled:opacity-50"
               placeholder="000000"
               value={otp}
               onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              onKeyDown={e => e.key === 'Enter' && otp.length === 6 && handleVerifyOtp()}
+              disabled={authLoading}
             />
             {authError && <p className="text-sm text-red-500">{authError}</p>}
-            <Button className="w-full" onClick={handleVerifyOtp} disabled={authLoading || otp.length !== 6}>
+            <Button type="submit" className="w-full" disabled={authLoading || otp.length !== 6}>
               {authLoading ? '驗證中...' : '驗證'}
             </Button>
             <div className="flex items-center justify-between text-xs text-zinc-400">
               <button
+                type="button"
                 className="text-blue-600 hover:underline"
                 onClick={handleBackToPassword}
               >
@@ -82,7 +89,7 @@ export function AdminLoginCard({ auth }: AdminLoginCardProps) {
                   : '驗證碼已過期'}
               </span>
             </div>
-          </div>
+          </form>
         )}
       </CardContent>
     </Card>

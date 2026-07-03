@@ -50,8 +50,10 @@ export default function EtiologyPage() {
   // operator always knows which record was handled most recently.
   const [lastSaved, setLastSaved] = useState<{ studyId: string; label: string } | null>(null);
 
-  // Per-row save state: studyId → 'saving' | 'error'
-  const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
+  // Per-row save state: studyId → status + the code being saved, so the
+  // dropdown keeps showing the chosen value until the row leaves the list
+  // instead of snapping back to「— 選擇 —」.
+  const [rowState, setRowState] = useState<Record<string, { status: 'saving' | 'error'; code: number }>>({});
 
   // Consensus meeting batch upload (auto-fill green records + push to REDCap)
   const [showBatchPreview, setShowBatchPreview] = useState(false);
@@ -191,7 +193,7 @@ export default function EtiologyPage() {
 
   // Write etiology_final for a record
   const handleSetFinal = useCallback(async (studyId: string, code: number) => {
-    setRowState(prev => ({ ...prev, [studyId]: 'saving' }));
+    setRowState(prev => ({ ...prev, [studyId]: { status: 'saving', code } }));
     try {
       const res = await fetch('/api/etiology', {
         method: 'POST',
@@ -201,7 +203,7 @@ export default function EtiologyPage() {
       if (!res.ok) {
         const d = await res.json();
         alert(d.error || '儲存失敗');
-        setRowState(prev => ({ ...prev, [studyId]: 'error' }));
+        setRowState(prev => ({ ...prev, [studyId]: { status: 'error', code } }));
         return;
       }
       // REDCap confirmed the write — update the local cache so the row leaves
@@ -215,7 +217,7 @@ export default function EtiologyPage() {
       });
     } catch {
       alert('網路錯誤，請稍後再試');
-      setRowState(prev => ({ ...prev, [studyId]: 'error' }));
+      setRowState(prev => ({ ...prev, [studyId]: { status: 'error', code } }));
     }
   }, [applyFinalLocally]);
 
@@ -698,11 +700,12 @@ export default function EtiologyPage() {
                     </thead>
                     <tbody>
                       {pageRows.map(r => {
-                        const isSaving = rowState[r.studyId] === 'saving';
+                        const pending = rowState[r.studyId];
+                        const isSaving = pending?.status === 'saving';
                         const isVisited = lastVisited === r.studyId;
                         const isConsensus = viewMode === 'consensus';
                         const isYellow = r.consensusStatus === 'yellow';
-                        const dropdownDisabled = isSaving || (isConsensus && isYellow);
+                        const dropdownHidden = isConsensus && isYellow;
 
                         // Row background
                         const rowBg = isVisited
@@ -765,16 +768,18 @@ export default function EtiologyPage() {
 
                             {/* etiology_final dropdown */}
                             <td className="px-3 py-1.5 text-center">
-                              {adminMode && !dropdownDisabled ? (
+                              {adminMode && !dropdownHidden ? (
+                                // Controlled: keeps showing the chosen value while the
+                                // save is in flight (and after a failure) instead of
+                                // snapping back to「— 選擇 —」.
                                 <select
                                   disabled={isSaving}
-                                  className="rounded border px-1.5 py-0.5 text-xs w-48 disabled:opacity-50"
-                                  defaultValue=""
+                                  className="rounded border px-1.5 py-0.5 text-xs w-48 disabled:opacity-70"
+                                  value={pending ? String(pending.code) : ''}
                                   onChange={e => {
                                     const val = e.target.value;
                                     if (val === '') return;
                                     handleSetFinal(r.studyId, parseInt(val));
-                                    e.target.value = '';
                                   }}
                                 >
                                   <option value="">— 選擇 —</option>
@@ -789,6 +794,9 @@ export default function EtiologyPage() {
                               )}
                               {isSaving && (
                                 <span className="ml-1 text-xs text-zinc-400">儲存中...</span>
+                              )}
+                              {pending?.status === 'error' && (
+                                <span className="ml-1 text-xs text-red-500">儲存失敗</span>
                               )}
                             </td>
                           </tr>

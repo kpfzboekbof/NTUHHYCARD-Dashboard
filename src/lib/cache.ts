@@ -1,4 +1,5 @@
 import NodeCache from 'node-cache';
+import { connectRedis } from './kv-store';
 
 // In-memory cache (works for local dev, short-lived on Vercel)
 const memCache = new NodeCache({ stdTTL: 300 });
@@ -9,14 +10,7 @@ const isVercel = !!process.env.VERCEL;
 async function getRedis() {
   if (!isVercel) return null;
   try {
-    const Redis = (await import('ioredis')).default;
-    const client = new Redis(process.env.REDIS_URL || '', {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-      connectTimeout: 3000,
-    });
-    await client.connect();
-    return client;
+    return await connectRedis({ connectTimeout: 3000 });
   } catch {
     return null;
   }
@@ -29,7 +23,7 @@ export function getCached<T>(key: string): T | undefined {
 export async function getCachedAsync<T>(key: string): Promise<T | undefined> {
   // Try memory first
   const mem = memCache.get<T>(key);
-  if (mem) return mem;
+  if (mem !== undefined) return mem;
 
   // Try Redis on Vercel
   if (isVercel) {
@@ -68,17 +62,26 @@ export function setCached<T>(key: string, data: T, ttl?: number): void {
   }
 }
 
-export function clearAllCache(): void {
+/**
+ * Clear memory + Redis cache. Await this before refetching — the Redis
+ * deletion used to be fire-and-forget, which raced against the fresh value
+ * being written right after (the delayed DEL could wipe the new entry).
+ */
+export async function clearAllCache(): Promise<void> {
   memCache.flushAll();
 
-  // Clear Redis cache keys too
   if (isVercel) {
-    getRedis().then(redis => {
+    let redis;
+    try {
+      redis = await getRedis();
       if (redis) {
-        redis.keys('cache:*').then(keys => {
-          if (keys.length > 0) redis.del(...keys);
-        }).finally(() => redis.disconnect());
+        const keys = await redis.keys('cache:*');
+        if (keys.length > 0) await redis.del(...keys);
       }
-    }).catch(() => {});
+    } catch {
+      // Redis unavailable — memory cache is already cleared
+    } finally {
+      redis?.disconnect();
+    }
   }
 }

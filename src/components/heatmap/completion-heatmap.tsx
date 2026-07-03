@@ -25,13 +25,17 @@ export function CompletionHeatmap({ rows }: CompletionHeatmapProps) {
   const [limit, setLimit] = useState(200);
 
   const { studyIds, matrix } = useMemo(() => {
-    // Get unique study IDs, sorted descending, limited
-    const allIds = [...new Set(rows.map(r => r.studyId))].sort().reverse().slice(0, limit);
+    // Get unique study IDs, sorted numerically descending (string sort put
+    // e.g. "999" ahead of "6000"), limited
+    const allIds = [...new Set(rows.map(r => r.studyId))]
+      .sort((a, b) => parseInt(b) - parseInt(a))
+      .slice(0, limit);
+    const idSet = new Set(allIds);
 
     // Build a lookup: studyId -> form -> statusCode
     const lookup = new Map<string, Map<string, number>>();
     for (const row of rows) {
-      if (!allIds.includes(row.studyId)) continue;
+      if (!idSet.has(row.studyId)) continue;
       if (!lookup.has(row.studyId)) lookup.set(row.studyId, new Map());
       lookup.get(row.studyId)!.set(row.form, row.statusCode);
     }

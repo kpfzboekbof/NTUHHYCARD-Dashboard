@@ -2,27 +2,20 @@
 
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { FORMS } from '@/config/forms';
+import { FORMS, getFormCategory } from '@/config/forms';
 import { useCompletionData } from '@/hooks/use-completion-data';
 import { useFilters } from '@/hooks/use-filters';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { filterRows } from '@/lib/filter-utils';
+import { redcapRecordUrl } from '@/config/redcap';
 import { ExternalLink } from 'lucide-react';
-
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';
-const REDCAP_PID = '8207';
 
 /** Map virtual form names to real REDCap form page names */
 function toRedcapFormName(form: string): string {
   if (form === 'ntuh_nhi_core_assistant' || form === 'ntuh_nhi_core_doctor') return 'ntuh_nhi_core';
   if (form.startsWith('ntuh_nhi_outcome_')) return 'ntuh_nhi_outcome';
   return form;
-}
-
-function redcapRecordUrl(studyId: string, form: string): string {
-  const page = toRedcapFormName(form);
-  return `${REDCAP_BASE}/redcap_v16.1.9/DataEntry/index.php?pid=${REDCAP_PID}&id=${studyId}&page=${page}`;
 }
 
 export default function IncompletePage() {
@@ -43,12 +36,18 @@ export default function IncompletePage() {
   const visibleForms = FORMS.filter(f => !hiddenForms.includes(f.name));
 
   const targetIds = data?.targetIds;
-  const targetId = targetIds ? Math.max(targetIds.basic ?? 0, targetIds.exam ?? 0) : 0;
+  const hasTarget = !!(targetIds && (targetIds.basic || targetIds.exam));
 
   const incompleteRows = useMemo(() => {
     let result = rows.filter(r => r.statusCode !== 2 && !r.excluded);
-    if (targetOnly && targetId > 0) {
-      result = result.filter(r => parseInt(r.studyId) <= targetId);
+    if (targetOnly && targetIds) {
+      // Each form category has its own target ID (basic vs exam) — using a
+      // single max threshold used to over-include the category with the
+      // smaller target.
+      result = result.filter(r => {
+        const limit = getFormCategory(r.form) === 'exam' ? targetIds.exam : targetIds.basic;
+        return !limit || parseInt(r.studyId) <= limit;
+      });
     }
     if (statusFilter !== 'all') {
       result = result.filter(r => r.status === statusFilter);
@@ -65,8 +64,12 @@ export default function IncompletePage() {
         r.hospitalName.toLowerCase().includes(q)
       );
     }
-    return result.sort((a, b) => a.owner.localeCompare(b.owner) || a.form.localeCompare(b.form) || a.studyId.localeCompare(b.studyId));
-  }, [rows, statusFilter, formFilter, search, targetOnly, targetId]);
+    return result.sort((a, b) =>
+      a.owner.localeCompare(b.owner) ||
+      a.form.localeCompare(b.form) ||
+      parseInt(a.studyId) - parseInt(b.studyId)
+    );
+  }, [rows, statusFilter, formFilter, search, targetOnly, targetIds]);
 
   const pageRows = incompleteRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(incompleteRows.length / PAGE_SIZE);
@@ -103,7 +106,7 @@ export default function IncompletePage() {
                 <option value="Incomplete">Incomplete</option>
                 <option value="Unverified">Unverified</option>
               </select>
-              {targetId > 0 && (
+              {hasTarget && (
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -112,7 +115,12 @@ export default function IncompletePage() {
                     className="rounded"
                   />
                   <span>目標進度</span>
-                  <span className="text-xs text-zinc-400">(ID ≤ {targetId})</span>
+                  <span className="text-xs text-zinc-400">
+                    ({[
+                      targetIds?.basic ? `基本 ≤ ${targetIds.basic}` : null,
+                      targetIds?.exam ? `檢查 ≤ ${targetIds.exam}` : null,
+                    ].filter(Boolean).join('、')})
+                  </span>
                 </label>
               )}
               <input
@@ -154,7 +162,7 @@ export default function IncompletePage() {
                           }`}
                           onClick={() => {
                             setLastVisited(rowKey);
-                            window.open(redcapRecordUrl(r.studyId, r.form), '_blank');
+                            window.open(redcapRecordUrl(r.studyId, toRedcapFormName(r.form)), '_blank');
                           }}
                         >
                           <td className="px-3 py-1.5 font-mono text-xs text-blue-600 flex items-center gap-1">

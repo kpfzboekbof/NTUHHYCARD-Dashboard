@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { list, get } from '@vercel/blob';
+import { isAdminRequest } from '@/lib/admin-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,29 +19,13 @@ async function readPrivateJson(pathname: string): Promise<unknown | null> {
   }
 }
 
-/** Verify admin auth (cookie-based, for Dashboard UI) */
-async function isAuthenticated(): Promise<boolean> {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  if (!adminPw) return false;
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  const expected = Math.abs(hash).toString(36);
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  return token === expected;
-}
-
 /**
  * GET /api/screening?month=2025-06
  *
  * 讀取指定月份的所有每日 JSON（從 Vercel Blob），合併回傳。
  */
 export async function GET(request: NextRequest) {
-  if (!await isAuthenticated()) {
+  if (!(await isAdminRequest())) {
     return NextResponse.json({ error: '未授權' }, { status: 401 });
   }
 

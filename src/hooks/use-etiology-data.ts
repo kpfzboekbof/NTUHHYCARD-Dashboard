@@ -1,16 +1,11 @@
 import { useCallback } from 'react';
-import useSWR from 'swr';
+import { useDashboardData } from './use-dashboard-data';
 import { ETIOLOGY_FINAL_MAP } from '@/lib/redcap/etiology-transform';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
 export function useEtiologyData() {
-  const { data, error, isLoading, isValidating, mutate } = useSWR<EtiologyResponse>(
-    '/api/etiology',
-    fetcher,
-    { refreshInterval: 300000 }
-  );
+  const { data, error, isLoading, mutate, refresh } =
+    useDashboardData<EtiologyResponse>('/api/etiology', 300000);
 
   /**
    * Mark records as having etiology_final set, in the local SWR cache only.
@@ -47,14 +42,5 @@ export function useEtiologyData() {
     [mutate],
   );
 
-  return {
-    data,
-    error,
-    isLoading: isLoading || isValidating,
-    applyFinalLocally,
-    refresh: () => mutate(
-      fetcher('/api/etiology?noCache=1'),
-      { revalidate: false }
-    ),
-  };
+  return { data, error, isLoading, applyFinalLocally, refresh };
 }

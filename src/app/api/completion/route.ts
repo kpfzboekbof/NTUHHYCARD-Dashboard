@@ -1,50 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers, fetchTraumaEligibleIds } from '@/lib/redcap/client';
 import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
-import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
-import type { CompletionResponse, User } from '@/types';
+import { getUsers, buildCompletionRows } from '@/lib/redcap/service';
+import { calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
+import type { CompletionResponse } from '@/types';
 
 const CACHE_KEY = 'completion';
-const USERS_CACHE_KEY = 'redcap_users';
 
 export async function GET(request: NextRequest) {
   try {
     const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
+    if (noCache) await clearAllCache();
 
     const cached = !noCache ? await getCachedAsync<CompletionResponse>(CACHE_KEY) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    const [assignments, hiddenForms] = await Promise.all([
+    const [assignments, hiddenForms, users] = await Promise.all([
       getAssignments(),
       getHiddenForms(),
+      getUsers(),
     ]);
 
-    // Fetch users with cache
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
-
-    const [raw, coreAssistantStatus, outcomeStatus, traumaIds] = await Promise.all([
-      fetchCompletionStatus(),
-      fetchCoreAssistantStatus(),
-      fetchOutcomeStatus(),
-      fetchTraumaEligibleIds(),
-    ]);
-    const rows = transformCompletion(raw, assignments, users, {
-      coreAssistant: coreAssistantStatus,
-      outcomeAssistant: outcomeStatus.assistantStatus,
-      outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-    }, traumaIds);
+    const rows = await buildCompletionRows(assignments, users);
     const visibleRows = rows.filter(r => !hiddenForms.includes(r.form));
     const byForm = calcFormStats(visibleRows);
     const byOwner = calcOwnerStats(visibleRows);

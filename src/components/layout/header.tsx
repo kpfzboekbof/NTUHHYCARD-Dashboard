@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useFilters } from '@/hooks/use-filters';
 import { HOSPITAL_OPTIONS } from '@/config/hospitals';
+import { cn } from '@/lib/utils';
 
 interface HeaderProps {
   title: string;
@@ -61,8 +62,4 @@ export function Header({ title, fetchedAt, onRefresh, isLoading, owners = [] }: 
       )}
     </header>
   );
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ');
 }

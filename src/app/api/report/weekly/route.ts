@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
+import { fetchLogging } from '@/lib/redcap/client';
 import { getAssignments, getTargetIds } from '@/lib/owner-store';
-import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
-import type { OwnerProductivity, User } from '@/types';
+import { getUsers, buildCompletionRows } from '@/lib/redcap/service';
+import { transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
+import type { OwnerProductivity } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,25 +61,12 @@ export async function GET(request: NextRequest) {
     const months = parseInt(searchParams.get('months') || '1');
     const staleDays = parseInt(searchParams.get('staleDays') || String(STALE_DAYS_DEFAULT));
 
-    const assignments = await getAssignments();
-
-    const rawUsers = await fetchUsers();
-    const users: User[] = rawUsers.map(u => ({
-      username: u.username,
-      name: `${u.lastname}${u.firstname}`,
-    }));
-
-    const [raw, coreAssistantStatus, outcomeStatus, targetIds] = await Promise.all([
-      fetchCompletionStatus(),
-      fetchCoreAssistantStatus(),
-      fetchOutcomeStatus(),
+    const [assignments, users, targetIds] = await Promise.all([
+      getAssignments(),
+      getUsers(),
       getTargetIds(),
     ]);
-    const completionRows = transformCompletion(raw, assignments, users, {
-      coreAssistant: coreAssistantStatus,
-      outcomeAssistant: outcomeStatus.assistantStatus,
-      outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-    });
+    const completionRows = await buildCompletionRows(assignments, users);
 
     const rawLogs = await fetchLogging(months);
     const logs = transformLogs(rawLogs);

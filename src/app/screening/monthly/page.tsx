@@ -9,27 +9,12 @@ import { useAdminAuth } from '@/hooks/use-admin-auth';
 import { AdminLoginCard } from '@/components/admin-login-card';
 import { ScreeningTabs } from '@/components/screening/screening-tabs';
 import { useScreeningData } from '@/hooks/use-screening-data';
+import { maskName, classLabel } from '@/lib/screening-utils';
 import type { ScreeningPatient } from '@/types';
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
-function maskName(name: string): string {
-  if (!name) return '';
-  const chars = [...name];
-  if (chars.length <= 1) return name;
-  return chars[0] + 'O' + chars.slice(2).join('');
-}
-
-function classLabel(cls: string) {
-  switch (cls) {
-    case 'OHCA': return 'OHCA';
-    case 'Prehospital_ROSC': return 'Prehospital ROSC';
-    case 'Possible_OHCA': return 'Possible OHCA';
-    default: return cls;
-  }
-}
-
 /** 本月是否要收錄這位病人到月報表 */
 function shouldInclude(p: ScreeningPatient): boolean {
   // 被人工排除的一律不收

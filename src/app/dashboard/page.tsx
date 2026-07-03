@@ -9,7 +9,7 @@ import { TargetProgress } from '@/components/dashboard/target-progress';
 import { filterRows } from '@/lib/filter-utils';
 
 export default function DashboardPage() {
-  const { data, isLoading, refresh } = useCompletionData();
+  const { data, error, isLoading, refresh } = useCompletionData();
   const { filters } = useFilters();
 
   const rows = data?.rows ? filterRows(data.rows, filters) : [];
@@ -19,7 +19,7 @@ export default function DashboardPage() {
       )
     : [];
   const owners = data?.byOwner?.map(o => o.owner) ?? [];
-  const hasError = data && !data.rows;
+  const hasError = !!error && !data;
 
   return (
     <div>

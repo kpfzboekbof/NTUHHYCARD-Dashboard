@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
+import { fetchLogging } from '@/lib/redcap/client';
 import { getAssignments, getTargetIds } from '@/lib/owner-store';
-import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
-import type { CompletionResponse, LoggingResponse, User } from '@/types';
-
-const USERS_CACHE_KEY = 'redcap_users';
+import { getUsers, getCompletionRowsCached } from '@/lib/redcap/service';
+import { transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
+import type { LoggingResponse } from '@/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,39 +13,15 @@ export async function GET(request: NextRequest) {
     const noCache = searchParams.get('noCache') === '1';
     const cacheKey = `logging_${months}`;
 
-    if (noCache) clearAllCache();
+    if (noCache) await clearAllCache();
 
     const cached = !noCache ? await getCachedAsync<LoggingResponse>(cacheKey) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    const assignments = await getAssignments();
-
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
-
-    // Need completion data for stats calculation
-    let completionRows = (await getCachedAsync<CompletionResponse>('completion'))?.rows;
-    if (!completionRows) {
-      const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
-        fetchCompletionStatus(),
-        fetchCoreAssistantStatus(),
-        fetchOutcomeStatus(),
-      ]);
-      completionRows = transformCompletion(raw, assignments, users, {
-        coreAssistant: coreAssistantStatus,
-        outcomeAssistant: outcomeStatus.assistantStatus,
-        outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-      });
-    }
+    const [assignments, users] = await Promise.all([getAssignments(), getUsers()]);
+    const completionRows = await getCompletionRowsCached(assignments, users);
 
     const rawLogs = await fetchLogging(months);
     const logs = transformLogs(rawLogs);

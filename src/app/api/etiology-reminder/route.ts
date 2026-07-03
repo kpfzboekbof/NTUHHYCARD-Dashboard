@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies, headers } from 'next/headers';
+import { headers } from 'next/headers';
 import * as nodemailer from 'nodemailer';
+import { isAdminRequest } from '@/lib/admin-auth';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -8,25 +9,6 @@ import { getMeetingSettings, setMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
 import { signRsvp } from '@/lib/rsvp-token';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
-
-function generateAdminToken(): string {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-async function verifyAdmin(): Promise<boolean> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  const expected = generateAdminToken();
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  return !!(adminPw && token && token === expected);
-}
 
 function createTransporter() {
   const user = process.env.GMAIL_USER;
@@ -113,7 +95,7 @@ export async function GET() {
 /** POST — send reminder emails or update meeting settings */
 export async function POST(request: NextRequest) {
   try {
-    if (!(await verifyAdmin())) {
+    if (!(await isAdminRequest())) {
       return NextResponse.json({ error: '未授權，請先以管理員身份登入' }, { status: 401 });
     }
 

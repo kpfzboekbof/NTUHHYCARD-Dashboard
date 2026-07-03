@@ -1,28 +1,11 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getCachedAsync, setCached } from '@/lib/cache';
-import { fetchUsers } from '@/lib/redcap/client';
+import { isAdminRequest } from '@/lib/admin-auth';
+import { getUsers } from '@/lib/redcap/service';
 import { getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
 import { getLabelers, setLabelers } from '@/lib/labelers';
 import type { Labeler } from '@/lib/redcap/etiology-transform';
 import type { TargetIds } from '@/lib/owner-store';
-import type { User, OwnerAssignments } from '@/types';
-
-const USERS_CACHE_KEY = 'redcap_users';
-
-async function getUsers(): Promise<User[]> {
-  const cached = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-  if (cached) return cached;
-
-  const raw = await fetchUsers();
-  const users: User[] = raw.map(u => ({
-    username: u.username,
-    name: `${u.lastname}${u.firstname}`,
-  }));
-
-  setCached(USERS_CACHE_KEY, users, 1800);
-  return users;
-}
+import type { OwnerAssignments } from '@/types';
 
 export async function GET() {
   try {
@@ -42,18 +25,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    // Verify admin auth
-    const cookieStore = await cookies();
-    const token = cookieStore.get('admin_token')?.value;
-    const adminPw = process.env.ADMIN_PASSWORD || '';
-    const data = `${adminPw}-ohca-admin-salt`;
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      hash = ((hash << 5) - hash) + data.charCodeAt(i);
-      hash |= 0;
-    }
-    const expected = Math.abs(hash).toString(36);
-    if (!adminPw || !token || token !== expected) {
+    if (!(await isAdminRequest())) {
       return NextResponse.json({ error: '未授權' }, { status: 401 });
     }
 

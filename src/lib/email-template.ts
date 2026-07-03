@@ -1,4 +1,4 @@
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207';
+import { redcapRecordUrl } from '@/config/redcap';
 
 export interface RsvpLinks {
   baseUrl: string;        // e.g. https://ohca.example.com
@@ -29,7 +29,7 @@ export function buildReminderEmail(
 
   const caseRows = incompleteCaseIds
     .map(id => {
-      const url = `${REDCAP_BASE}&id=${id}&page=ntuh_nhi_etiology`;
+      const url = redcapRecordUrl(id, 'ntuh_nhi_etiology');
       return `<tr>
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb;font-family:monospace;">
           <a href="${url}" style="color:#2563eb;text-decoration:none;">${id}</a>

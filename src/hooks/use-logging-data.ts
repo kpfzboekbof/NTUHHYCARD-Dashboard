@@ -1,8 +1,8 @@
-import useSWR from 'swr';
+import { useDashboardData } from './use-dashboard-data';
 import type { LoggingResponse, Filters } from '@/types';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
+// NOTE: the logging API only supports month granularity, so「本週」and
+// 「本月」both map to 1 month of data.
 function timeRangeToMonths(range: Filters['timeRange']): number {
   switch (range) {
     case 'week': return 1;
@@ -15,19 +15,5 @@ function timeRangeToMonths(range: Filters['timeRange']): number {
 
 export function useLoggingData(timeRange: Filters['timeRange'] = '3months') {
   const months = timeRangeToMonths(timeRange);
-  const { data, error, isLoading, isValidating, mutate } = useSWR<LoggingResponse>(
-    `/api/logging?months=${months}`,
-    fetcher,
-    { refreshInterval: 600000 }
-  );
-
-  return {
-    data,
-    error,
-    isLoading: isLoading || isValidating,
-    refresh: () => mutate(
-      fetcher(`/api/logging?months=${months}&noCache=1`),
-      { revalidate: false }
-    ),
-  };
+  return useDashboardData<LoggingResponse>(`/api/logging?months=${months}`, 600000);
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchQcRecords, batchImportField } from '@/lib/redcap/client';
 import { clearAllCache } from '@/lib/cache';
+import { isAdminRequest } from '@/lib/admin-auth';
 
 /**
  * POST /api/qc/fix
@@ -29,6 +30,12 @@ const FIX_HANDLERS: Record<string, (rows: Record<string, string>[]) => { records
 
 export async function POST(request: NextRequest) {
   try {
+    // Writes into REDCap — admin only (this endpoint used to have no check at
+    // all, unlike every other REDCap-writing route).
+    if (!(await isAdminRequest())) {
+      return NextResponse.json({ error: '未授權，請先以管理員身份登入' }, { status: 401 });
+    }
+
     const body = await request.json();
     const checkId = body?.checkId as string;
 
@@ -48,7 +55,7 @@ export async function POST(request: NextRequest) {
     }
 
     const updated = await batchImportField(records);
-    clearAllCache();
+    await clearAllCache();
 
     return NextResponse.json({ updated, studyIds } satisfies FixResult);
   } catch (error) {

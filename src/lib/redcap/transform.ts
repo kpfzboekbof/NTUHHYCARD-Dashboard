@@ -1,4 +1,4 @@
-import { FORMS, FORM_LABEL_MAP, EXAM_FORMS } from '@/config/forms';
+import { FORMS, EXAM_FORMS } from '@/config/forms';
 import { HOSPITALS } from '@/config/hospitals';
 import type {
   CompletionRow, FormStats, OwnerStats, LogEntry,
@@ -241,6 +241,13 @@ export function calcLoggingStats(
     }
   }
 
+  // Effective target per form: the exam/basic target ID when configured,
+  // otherwise the form's own default target.
+  const targetFor = (f: (typeof FORMS)[number]) => {
+    const tid = EXAM_FORMS.includes(f.name) ? targetIds?.exam : targetIds?.basic;
+    return tid ?? f.target;
+  };
+
   // Owner productivity
   const byOwner: OwnerProductivity[] = [];
   const ownerForms = new Map<string, typeof FORMS>();
@@ -253,11 +260,7 @@ export function calcLoggingStats(
   }
 
   for (const [owner, forms] of ownerForms) {
-    const totalTarget = forms.reduce((s, f) => {
-      const isExam = EXAM_FORMS.includes(f.name);
-      const tid = isExam ? targetIds?.exam : targetIds?.basic;
-      return s + (tid ?? f.target);
-    }, 0);
+    const totalTarget = forms.reduce((s, f) => s + targetFor(f), 0);
     const totalComplete = forms.reduce(
       (s, f) => s + (ownerFormComplete.get(`${owner}|${f.name}`) || 0), 0
     );
@@ -294,13 +297,14 @@ export function calcLoggingStats(
   for (const [owner, forms] of ownerForms) {
     for (const f of forms) {
       const completed = ownerFormComplete.get(`${owner}|${f.name}`) || 0;
+      const target = targetFor(f);
       byOwnerForm.push({
         owner,
         form: f.name,
         label: f.label,
-        target: (() => { const isExam = EXAM_FORMS.includes(f.name); return (isExam ? targetIds?.exam : targetIds?.basic) ?? f.target; })(),
+        target,
         completed,
-        pct: (() => { const isExam = EXAM_FORMS.includes(f.name); const t = (isExam ? targetIds?.exam : targetIds?.basic) ?? f.target; return t > 0 ? Math.round(completed / t * 1000) / 10 : 0; })(),
+        pct: target > 0 ? Math.round(completed / target * 1000) / 10 : 0,
       });
     }
   }

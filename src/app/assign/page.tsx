@@ -1,59 +1,26 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import useSWR from 'swr';
-import { Lock, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useCompletionData } from '@/hooks/use-completion-data';
+import { jsonFetcher } from '@/hooks/use-dashboard-data';
+import { useAdminAuth } from '@/hooks/use-admin-auth';
+import { AdminLoginCard } from '@/components/admin-login-card';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { FORMS } from '@/config/forms';
 import type { User, OwnerAssignments } from '@/types';
 
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
 export default function AssignPage() {
   const { data: compData, refresh } = useCompletionData();
   const { data: ownerData, mutate: mutateOwners } = useSWR<{ users: User[]; assignments: OwnerAssignments; hiddenForms: string[]; targetIds: { basic: number | null; exam: number | null }; labelers: { code: number; name: string; email?: string }[] }>(
-    '/api/owners', fetcher
+    '/api/owners', jsonFetcher
   );
 
-  // Auth state
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
-
-  // Check auth on mount
-  useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(d.authenticated));
-  }, []);
-
-  const handleLogin = useCallback(async () => {
-    setAuthLoading(true);
-    setAuthError('');
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setAuthenticated(true);
-        setPassword('');
-      } else {
-        setAuthError(data.error || '登入失敗');
-      }
-    } finally {
-      setAuthLoading(false);
-    }
-  }, [password]);
-
-  const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
-    setAuthenticated(false);
-  }, []);
+  const auth = useAdminAuth();
+  const { authenticated, handleLogout } = auth;
 
   // Editor state
   const [editing, setEditing] = useState(false);
@@ -139,31 +106,7 @@ export default function AssignPage() {
       <div>
         <Header title="管理者頁面" />
         <div className="flex min-h-[60vh] items-center justify-center">
-          <Card className="w-80">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Lock className="h-5 w-5" />
-                管理員登入
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <input
-                  type="password"
-                  className="w-full rounded border px-3 py-2 text-sm"
-                  placeholder="請輸入管理員密碼"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  autoFocus
-                />
-                {authError && <p className="text-sm text-red-500">{authError}</p>}
-                <Button className="w-full" onClick={handleLogin} disabled={authLoading || !password}>
-                  {authLoading ? '登入中...' : '登入'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <AdminLoginCard auth={auth} />
         </div>
       </div>
     );

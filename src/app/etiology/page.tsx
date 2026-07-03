@@ -28,7 +28,7 @@ function consensusBgClass(status: ConsensusStatus): string {
 }
 
 export default function EtiologyPage() {
-  const { data, isLoading, refresh } = useEtiologyData();
+  const { data, isLoading, refresh, applyFinalLocally } = useEtiologyData();
   const [search, setSearch] = useState('');
   const [idFrom, setIdFrom] = useState('');
   const [idTo, setIdTo] = useState('');
@@ -45,6 +45,10 @@ export default function EtiologyPage() {
 
   // Last visited (highlight)
   const [lastVisited, setLastVisited] = useState<string | null>(null);
+
+  // Last record whose etiology_final was saved — shown above the table so the
+  // operator always knows which record was handled most recently.
+  const [lastSaved, setLastSaved] = useState<{ studyId: string; label: string } | null>(null);
 
   // Per-row save state: studyId → 'saving' | 'error'
   const [rowState, setRowState] = useState<Record<string, 'saving' | 'error'>>({});
@@ -200,7 +204,10 @@ export default function EtiologyPage() {
         setRowState(prev => ({ ...prev, [studyId]: 'error' }));
         return;
       }
-      refresh();
+      // REDCap confirmed the write — update the local cache so the row leaves
+      // the list immediately instead of after a slow full re-export.
+      applyFinalLocally([{ studyId, code }]);
+      setLastSaved({ studyId, label: ETIOLOGY_FINAL_MAP[code] ?? `Code ${code}` });
       setRowState(prev => {
         const next = { ...prev };
         delete next[studyId];
@@ -210,7 +217,7 @@ export default function EtiologyPage() {
       alert('網路錯誤，請稍後再試');
       setRowState(prev => ({ ...prev, [studyId]: 'error' }));
     }
-  }, [refresh]);
+  }, [applyFinalLocally]);
 
   const labelers = data?.labelers ?? [];
 
@@ -275,7 +282,7 @@ export default function EtiologyPage() {
         alert(d.error || '上傳失敗');
         return;
       }
-      refresh();
+      applyFinalLocally(updates);
       setShowBatchPreview(false);
       alert(`已上傳 ${d.count ?? updates.length} 筆共識結果到 REDCap`);
     } catch {
@@ -283,7 +290,7 @@ export default function EtiologyPage() {
     } finally {
       setBatchUpdating(false);
     }
-  }, [greenForBatch, refresh]);
+  }, [greenForBatch, applyFinalLocally]);
 
   const pageRows = visibleRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(visibleRecords.length / PAGE_SIZE);
@@ -653,6 +660,17 @@ export default function EtiologyPage() {
                         ))}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {lastSaved && (
+                  <div className="mb-3">
+                    <span className={`inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300 ${viewMode === 'consensus' ? 'text-base' : 'text-xs'}`}>
+                      <Check className={viewMode === 'consensus' ? 'h-4 w-4' : 'h-3 w-3'} />
+                      最近儲存：<span className="font-mono">{lastSaved.studyId}</span>
+                      <span aria-hidden>→</span>
+                      {lastSaved.label}
+                    </span>
                   </div>
                 )}
 

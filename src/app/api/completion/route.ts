@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
+import { NextRequest, NextResponse, after } from 'next/server';
+import { getCachedAsync, setCached, invalidate, singleFlight } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers, fetchTraumaEligibleIds } from '@/lib/redcap/client';
-import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
+import { getOwnerStore, pickTargetIds } from '@/lib/owner-store';
 import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
 import type { CompletionResponse, User } from '@/types';
 
@@ -11,62 +11,71 @@ const USERS_CACHE_KEY = 'redcap_users';
 export async function GET(request: NextRequest) {
   try {
     const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
+    // Targeted, not global: the users cache (30 min) and every other route's
+    // cache used to be flushed by a single refresh-button press.
+    if (noCache) await invalidate([CACHE_KEY]);
 
     const cached = !noCache ? await getCachedAsync<CompletionResponse>(CACHE_KEY) : undefined;
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    const [assignments, hiddenForms] = await Promise.all([
-      getAssignments(),
-      getHiddenForms(),
-    ]);
+    // Every open tab polls on the same 5-minute interval as the server TTL, so
+    // they all expire together. Collapse the stampede into one REDCap load.
+    const data = await singleFlight(CACHE_KEY, async () => {
+      // One read of the owner-store blob instead of three round trips
+      // (getAssignments + getHiddenForms + a serial getTargetIds at the end).
+      const store = await getOwnerStore();
+      const assignments = store.assignments ?? {};
+      const hiddenForms = store.hiddenForms ?? [];
 
-    // Fetch users with cache
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
+      // Fetch users with cache
+      let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
+      if (!users) {
+        const rawUsers = await fetchUsers();
+        users = rawUsers.map(u => ({
+          username: u.username,
+          name: `${u.lastname}${u.firstname}`,
+        }));
+        after(setCached(USERS_CACHE_KEY, users, 1800));
+      }
 
-    const [raw, coreAssistantStatus, outcomeStatus, traumaIds] = await Promise.all([
-      fetchCompletionStatus(),
-      fetchCoreAssistantStatus(),
-      fetchOutcomeStatus(),
-      fetchTraumaEligibleIds(),
-    ]);
-    const rows = transformCompletion(raw, assignments, users, {
-      coreAssistant: coreAssistantStatus,
-      outcomeAssistant: outcomeStatus.assistantStatus,
-      outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-    }, traumaIds);
-    const visibleRows = rows.filter(r => !hiddenForms.includes(r.form));
-    const byForm = calcFormStats(visibleRows);
-    const byOwner = calcOwnerStats(visibleRows);
+      const [raw, coreAssistantStatus, outcomeStatus, traumaIds] = await Promise.all([
+        fetchCompletionStatus(),
+        fetchCoreAssistantStatus(),
+        fetchOutcomeStatus(),
+        fetchTraumaEligibleIds(),
+      ]);
+      const rows = transformCompletion(raw, assignments, users, {
+        coreAssistant: coreAssistantStatus,
+        outcomeAssistant: outcomeStatus.assistantStatus,
+        outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
+      }, traumaIds);
+      const visibleRows = rows.filter(r => !hiddenForms.includes(r.form));
+      const byForm = calcFormStats(visibleRows);
+      const byOwner = calcOwnerStats(visibleRows);
 
-    // Count unique study IDs
-    const allStudyIds = new Set(rows.map(r => r.studyId));
-    const validStudyIds = new Set(rows.filter(r => !r.excluded).map(r => r.studyId));
+      // Count unique study IDs
+      const allStudyIds = new Set(rows.map(r => r.studyId));
+      const validStudyIds = new Set(rows.filter(r => !r.excluded).map(r => r.studyId));
 
-    const data: CompletionResponse = {
-      rows: visibleRows,
-      byForm,
-      byOwner,
-      users,
-      assignments,
-      hiddenForms,
-      targetIds: await getTargetIds(),
-      totalRecords: allStudyIds.size,
-      validOhcaCount: validStudyIds.size,
-      fetchedAt: new Date().toISOString(),
-    };
+      const fresh: CompletionResponse = {
+        rows: visibleRows,
+        byForm,
+        byOwner,
+        users,
+        assignments,
+        hiddenForms,
+        targetIds: pickTargetIds(store),
+        totalRecords: allStudyIds.size,
+        validOhcaCount: validStudyIds.size,
+        fetchedAt: new Date().toISOString(),
+      };
 
-    setCached(CACHE_KEY, data, 300);
+      after(setCached(CACHE_KEY, fresh, 300));
+      return fresh;
+    });
+
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

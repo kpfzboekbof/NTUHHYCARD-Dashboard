@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { cookies } from 'next/headers';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
+import { getCachedAsync, setCached, invalidate, COMPLETION_DERIVED } from '@/lib/cache';
 import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -22,7 +22,7 @@ const CACHE_KEY = 'etiology';
 export async function GET(request: NextRequest) {
   try {
     const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
+    if (noCache) await invalidate([CACHE_KEY]);
 
     const cached = !noCache ? await getCachedAsync<EtiologyResponse>(CACHE_KEY) : undefined;
     if (cached) {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       fetchedAt: new Date().toISOString(),
     };
 
-    setCached(CACHE_KEY, data, 300);
+    after(setCached(CACHE_KEY, data, 300));
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -72,7 +72,9 @@ export async function POST(request: NextRequest) {
       }
       const records = cleaned.map(u => ({ study_id: u.studyId, etiology_final: String(u.code) }));
       const count = await batchImportField(records);
-      clearAllCache();
+      // etiology_final drives the ntuh_nhi_outcome_etiology virtual form, which
+      // feeds the logging byOwner counts and the QC behaviour flags too.
+      await invalidate([CACHE_KEY, ...COMPLETION_DERIVED]);
       return NextResponse.json({ ok: true, count });
     }
 
@@ -83,8 +85,9 @@ export async function POST(request: NextRequest) {
 
     await importEtiologyFinal(studyId, code);
 
-    // Clear etiology cache so next fetch reflects the change
-    clearAllCache();
+    // Clear the etiology cache and everything derived from completion status
+    // so the next fetch reflects the change.
+    await invalidate([CACHE_KEY, ...COMPLETION_DERIVED]);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

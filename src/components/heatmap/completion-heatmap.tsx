@@ -27,11 +27,14 @@ export function CompletionHeatmap({ rows }: CompletionHeatmapProps) {
   const { studyIds, matrix } = useMemo(() => {
     // Get unique study IDs, sorted descending, limited
     const allIds = [...new Set(rows.map(r => r.studyId))].sort().reverse().slice(0, limit);
+    // Set membership instead of Array.includes: the scan below runs over every
+    // row, so the linear lookup made this O(rows x limit).
+    const want = new Set(allIds);
 
     // Build a lookup: studyId -> form -> statusCode
     const lookup = new Map<string, Map<string, number>>();
     for (const row of rows) {
-      if (!allIds.includes(row.studyId)) continue;
+      if (!want.has(row.studyId)) continue;
       if (!lookup.has(row.studyId)) lookup.set(row.studyId, new Map());
       lookup.get(row.studyId)!.set(row.form, row.statusCode);
     }

@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Menu } from 'lucide-react';
 import { SWRConfig } from 'swr';
 import { Sidebar } from './sidebar';
 import { FiltersContext, defaultFilters } from '@/hooks/use-filters';
 import type { Filters } from '@/types';
+
+// Hoisted: an inline object literal here is a fresh value on every render, and
+// SWRConfig keys its context memo on it — so every useSWR consumer in the app
+// re-rendered whenever the sidebar toggled.
+const SWR_CONFIG = { revalidateOnFocus: false };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
@@ -15,9 +20,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setFilters(prev => ({ ...prev, [key]: value }));
   }, []);
 
+  const filtersValue = useMemo(
+    () => ({ filters, setFilters, setFilter }),
+    [filters, setFilter],
+  );
+
   return (
-    <SWRConfig value={{ revalidateOnFocus: false }}>
-      <FiltersContext.Provider value={{ filters, setFilters, setFilter }}>
+    <SWRConfig value={SWR_CONFIG}>
+      <FiltersContext.Provider value={filtersValue}>
         {/* Top bar with hamburger */}
         <div className="fixed top-0 left-0 z-50 flex h-12 w-12 items-center justify-center">
           <button

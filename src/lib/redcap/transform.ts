@@ -33,6 +33,18 @@ export function transformCompletion(
 ): CompletionRow[] {
   const rows: CompletionRow[] = [];
 
+  // Hoisted out of the per-record x per-form loop: resolveOwner used to run a
+  // linear `users.find` for every one of the ~90k (record x form) cells.
+  const nameByUsername = new Map(users.map(u => [u.username, u.name]));
+  const ownerByForm = new Map(FORMS.map(f => {
+    const username = assignments[f.name];
+    if (!username) return [f.name, UNASSIGNED] as const;
+    // `|| username` — NOT `?? UNASSIGNED`. A form assigned to a username that
+    // is missing from the REDCap user export must keep showing that username,
+    // otherwise a real person's completed work is reported as ownerless.
+    return [f.name, nameByUsername.get(username) || username] as const;
+  }));
+
   for (const record of raw) {
     const studyId = record.study_id;
     const hospital = parseInt(record.hospital) || 0;
@@ -82,7 +94,7 @@ export function transformCompletion(
         hospitalName,
         form: form.name,
         label: form.label,
-        owner: resolveOwner(form.name, assignments, users),
+        owner: ownerByForm.get(form.name) ?? UNASSIGNED,
         statusCode,
         status: statusCode === 2 ? 'Complete' : statusCode === 1 ? 'Unverified' : 'Incomplete',
         excluded,
@@ -243,14 +255,21 @@ export function calcLoggingStats(
 
   // Owner productivity
   const byOwner: OwnerProductivity[] = [];
-  const ownerForms = new Map<string, typeof FORMS>();
+  // Two nested linear scans per completion row (FORMS.find + arr.find) became
+  // a Map lookup + Set insert. Set preserves insertion order, so the resulting
+  // `byOwnerForm` array order is unchanged.
+  const formByName = new Map(FORMS.map(f => [f.name, f]));
+  const ownerFormSets = new Map<string, Set<(typeof FORMS)[number]>>();
   for (const row of completionRows) {
-    const form = FORMS.find(f => f.name === row.form);
+    const form = formByName.get(row.form);
     if (!form) continue;
-    if (!ownerForms.has(row.owner)) ownerForms.set(row.owner, []);
-    const arr = ownerForms.get(row.owner)!;
-    if (!arr.find(f => f.name === form.name)) arr.push(form);
+    let set = ownerFormSets.get(row.owner);
+    if (!set) { set = new Set(); ownerFormSets.set(row.owner, set); }
+    set.add(form);
   }
+  const ownerForms = new Map<string, typeof FORMS>(
+    Array.from(ownerFormSets, ([owner, set]) => [owner, Array.from(set)]),
+  );
 
   for (const [owner, forms] of ownerForms) {
     const totalTarget = forms.reduce((s, f) => {

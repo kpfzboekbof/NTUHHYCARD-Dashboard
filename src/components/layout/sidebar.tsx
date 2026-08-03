@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -24,6 +25,33 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
+/**
+ * A Link that only prefetches once the user shows intent.
+ *
+ * The sidebar is permanently mounted and merely translated off-screen, and
+ * Next's link observer uses a 200px rootMargin — wider than the 12px the
+ * closed sidebar sits outside the viewport. So all ten nav links counted as
+ * visible and prefetched on every page in the app, downloading *and
+ * executing* every route's JS chunks alongside the critical hydration.
+ */
+type NavLinkProps = Omit<React.ComponentProps<typeof Link>, 'prefetch'>;
+
+function NavLink({ children, ...rest }: NavLinkProps) {
+  const [intent, setIntent] = useState(false);
+  const arm = () => setIntent(true);
+  return (
+    <Link
+      {...rest}
+      prefetch={intent ? null : false}
+      onMouseEnter={arm}
+      onFocus={arm}
+      onTouchStart={arm}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
 
@@ -36,7 +64,7 @@ export function Sidebar({ onClose }: SidebarProps) {
         {NAV_ITEMS.map(item => {
           const active = pathname === item.href;
           return (
-            <Link
+            <NavLink
               key={item.href}
               href={item.href}
               onClick={onClose}
@@ -49,7 +77,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             >
               <item.icon className="h-4 w-4" />
               {item.label}
-            </Link>
+            </NavLink>
           );
         })}
       </nav>

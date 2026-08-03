@@ -1,23 +1,18 @@
+import { getRedis, isRedisEnabled } from '@/lib/redis';
 import type { Labeler } from '@/lib/redcap/etiology-transform';
 
 const REDIS_KEY = 'labelers';
-const isVercel = !!process.env.VERCEL;
+const isVercel = isRedisEnabled;
 
 async function readRedis(): Promise<Labeler[]> {
-  let client;
   try {
-    const Redis = (await import('ioredis')).default;
-    client = new Redis(process.env.REDIS_URL || '', {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    await client.connect();
+    const client = await getRedis();
+    if (!client) return [];
     const raw = await client.get(REDIS_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (err) {
+    console.error('[labelers] redis read failed', err);
     return [];
-  } finally {
-    client?.disconnect();
   }
 }
 
@@ -53,18 +48,9 @@ export async function getLabelers(): Promise<Labeler[]> {
 
 export async function setLabelers(labelers: Labeler[]): Promise<void> {
   if (isVercel) {
-    let client;
-    try {
-      const Redis = (await import('ioredis')).default;
-      client = new Redis(process.env.REDIS_URL || '', {
-        maxRetriesPerRequest: 1,
-        lazyConnect: true,
-      });
-      await client.connect();
-      await client.set(REDIS_KEY, JSON.stringify(labelers));
-    } finally {
-      client?.disconnect();
-    }
+    const client = await getRedis();
+    if (!client) throw new Error('Redis unavailable — labelers not written');
+    await client.set(REDIS_KEY, JSON.stringify(labelers));
   } else {
     const { writeFileSync, mkdirSync } = require('fs');
     const { join } = require('path');

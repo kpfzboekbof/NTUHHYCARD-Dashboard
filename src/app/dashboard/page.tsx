@@ -1,23 +1,28 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useCompletionData } from '@/hooks/use-completion-data';
 import { useFilters } from '@/hooks/use-filters';
 import { Header } from '@/components/layout/header';
 import { StatCards } from '@/components/dashboard/stat-cards';
 import { FormBarChart } from '@/components/dashboard/form-bar-chart';
 import { TargetProgress } from '@/components/dashboard/target-progress';
-import { filterRows } from '@/lib/filter-utils';
+import { filterRows, EMPTY_ROWS } from '@/lib/filter-utils';
 
 export default function DashboardPage() {
   const { data, isLoading, refresh } = useCompletionData();
   const { filters } = useFilters();
 
-  const rows = data?.rows ? filterRows(data.rows, filters) : [];
-  const byForm = data?.byForm
-    ? data.byForm.filter(f =>
-        (filters.owner === '全部' || f.owner === filters.owner)
-      )
-    : [];
+  const rows = useMemo(
+    () => (data?.rows ? filterRows(data.rows, filters) : EMPTY_ROWS),
+    [data?.rows, filters],
+  );
+  const byForm = useMemo(
+    () => (data?.byForm
+      ? data.byForm.filter(f => (filters.owner === '全部' || f.owner === filters.owner))
+      : []),
+    [data?.byForm, filters.owner],
+  );
   const owners = data?.byOwner?.map(o => o.owner) ?? [];
   const hasError = data && !data.rows;
 

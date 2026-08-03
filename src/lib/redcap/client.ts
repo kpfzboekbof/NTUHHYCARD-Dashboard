@@ -24,22 +24,79 @@ async function redcapPost(body: Record<string, string>): Promise<Response> {
   return res;
 }
 
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
+/**
+ * RFC4180-aware CSV parser.
+ *
+ * The previous implementation split on `,` and `\n` unconditionally, so any
+ * quoted cell containing a comma or newline shifted every subsequent column
+ * of that row — silently, and on a medical registry. It also ran a regex per
+ * cell, which dominated parse time on whole-project exports.
+ *
+ * Returns real `Record<string, string>` objects: `fetchCoreAssistantStatus`
+ * enumerates `Object.keys(row)` to discover `airway_core___N` checkbox
+ * columns, so a lazy view object here would silently mark every Core 助理
+ * record incomplete.
+ */
+export function parseCsv(text: string): Record<string, string>[] {
   const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const values = line.split(',').map(v => v.replace(/^"|"$/g, ''));
+  const len = text.length;
+  if (len === 0) return rows;
+
+  let pos = 0;
+  let headers: string[] | null = null;
+  let headerCount = 0;
+
+  // Scan one record (which may span lines inside quotes) into `cells`.
+  const cells: string[] = [];
+  while (pos < len) {
+    cells.length = 0;
+    let cell = '';
+    let inQuotes = false;
+    let sawQuote = false;
+    let endOfRecord = false;
+
+    while (pos < len) {
+      const ch = text[pos];
+
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[pos + 1] === '"') { cell += '"'; pos += 2; continue; }
+          inQuotes = false; pos++; continue;
+        }
+        cell += ch; pos++; continue;
+      }
+
+      if (ch === '"') { inQuotes = true; sawQuote = true; pos++; continue; }
+      if (ch === ',') { cells.push(cell); cell = ''; pos++; continue; }
+      if (ch === '\n') { pos++; endOfRecord = true; break; }
+      if (ch === '\r') {
+        // Strip a lone CR only when it terminates the record (CRLF).
+        if (text[pos + 1] === '\n') { pos += 2; endOfRecord = true; break; }
+        cell += ch; pos++; continue;
+      }
+      cell += ch; pos++;
+    }
+    cells.push(cell);
+    void endOfRecord;
+
+    if (headers === null) {
+      // Header names keep the original `.trim()` behaviour.
+      headers = cells.map(h => h.trim());
+      headerCount = headers.length;
+      continue;
+    }
+
+    // Skip fully blank records (trailing newline, stray CRLF).
+    if (cells.length === 1 && cells[0] === '' && !sawQuote) continue;
+
     const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j] ?? '';
+    for (let j = 0; j < headerCount; j++) {
+      row[headers[j]] = cells[j] ?? '';
     }
     rows.push(row);
   }
-  return rows;
+
+  return headers === null ? [] : rows;
 }
 
 /** Aggregate repeat-instrument rows: keep max completion status per study_id per form */

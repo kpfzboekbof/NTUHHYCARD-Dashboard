@@ -1,5 +1,6 @@
 'use client';
 
+import { memo, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Database, ShieldCheck, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import type { CompletionRow } from '@/types';
@@ -8,15 +9,35 @@ interface StatCardsProps {
   rows: CompletionRow[];
 }
 
-export function StatCards({ rows }: StatCardsProps) {
-  const totalRecords = new Set(rows.map(r => r.studyId)).size;
-  const validRows = rows.filter(r => !r.excluded);
-  const validOhcaCount = new Set(validRows.map(r => r.studyId)).size;
-  const completePct = validRows.length > 0
-    ? Math.round(validRows.filter(r => r.statusCode === 2).length / validRows.length * 1000) / 10
-    : 0;
-  const unverifiedCount = validRows.filter(r => r.statusCode === 1).length;
-  const incompleteCount = validRows.filter(r => r.statusCode === 0).length;
+function StatCardsImpl({ rows }: StatCardsProps) {
+  // One pass instead of six full traversals (two Sets, one filter, three more
+  // filters over the filtered copy) on every render of a ~60k-row array.
+  const {
+    totalRecords, validOhcaCount, completePct, unverifiedCount, incompleteCount,
+  } = useMemo(() => {
+    const allIds = new Set<string>();
+    const validIds = new Set<string>();
+    let validCount = 0, complete = 0, unverified = 0, incomplete = 0;
+
+    for (const r of rows) {
+      // Added before the exclusion check — totalRecords is a pre-exclusion count.
+      allIds.add(r.studyId);
+      if (r.excluded) continue;
+      validIds.add(r.studyId);
+      validCount++;
+      if (r.statusCode === 2) complete++;
+      else if (r.statusCode === 1) unverified++;
+      else incomplete++;
+    }
+
+    return {
+      totalRecords: allIds.size,
+      validOhcaCount: validIds.size,
+      completePct: validCount > 0 ? Math.round(complete / validCount * 1000) / 10 : 0,
+      unverifiedCount: unverified,
+      incompleteCount: incomplete,
+    };
+  }, [rows]);
 
   const cards = [
     { label: '總記錄數', value: totalRecords.toLocaleString(), icon: Database, color: 'text-blue-600', bg: 'bg-blue-50' },
@@ -44,3 +65,5 @@ export function StatCards({ rows }: StatCardsProps) {
     </div>
   );
 }
+
+export const StatCards = memo(StatCardsImpl);

@@ -2,28 +2,24 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
-} from 'recharts';
+import { LazyOwnerBarChart } from '@/components/charts/lazy-charts';
 import { useCompletionData } from '@/hooks/use-completion-data';
 import { useFilters } from '@/hooks/use-filters';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TargetProgress } from '@/components/dashboard/target-progress';
-import { filterRows } from '@/lib/filter-utils';
+import { filterRows, EMPTY_ROWS } from '@/lib/filter-utils';
+import { getColor } from '@/lib/pct-color';
 import { FORMS } from '@/config/forms';
-
-function getColor(pct: number): string {
-  if (pct >= 80) return '#22c55e';
-  if (pct >= 50) return '#f59e0b';
-  return '#ef4444';
-}
 
 export default function OwnersPage() {
   const router = useRouter();
   const { data, isLoading, refresh } = useCompletionData();
   const { filters } = useFilters();
-  const rows = data?.rows ? filterRows(data.rows, filters) : [];
+  const rows = useMemo(
+    () => (data?.rows ? filterRows(data.rows, filters) : EMPTY_ROWS),
+    [data?.rows, filters],
+  );
   const owners = data?.byOwner?.map(o => o.owner).filter(o => o !== '未指派') ?? [];
 
   const ownerStats = useMemo(() => {
@@ -81,6 +77,22 @@ export default function OwnersPage() {
     return result;
   }, [rows]);
 
+  // Index the matrix so the table body is a Map lookup per cell instead of a
+  // linear scan of every (owner x form) entry — the table renders
+  // owners x forms cells, so the scan was quadratic in the matrix size.
+  const { sortedOwners, pctByOwnerForm } = useMemo(() => {
+    const byOwner = new Map<string, Map<string, number>>();
+    for (const x of ownerFormMatrix) {
+      let fm = byOwner.get(x.owner);
+      if (!fm) { fm = new Map(); byOwner.set(x.owner, fm); }
+      fm.set(x.form, x.pct);
+    }
+    return {
+      sortedOwners: [...byOwner.keys()].sort(),
+      pctByOwnerForm: byOwner,
+    };
+  }, [ownerFormMatrix]);
+
   // When a specific owner is selected, only show their forms
   const visibleForms = useMemo(() => {
     if (filters.owner === '全部') return FORMS;
@@ -105,19 +117,7 @@ export default function OwnersPage() {
               <Card>
                 <CardHeader><CardTitle>各負責人完成率</CardTitle></CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={ownerStats}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="owner" />
-                      <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} />
-                      <Tooltip formatter={(v) => [`${v}%`, 'Complete']} />
-                      <Bar dataKey="pct" radius={[4, 4, 0, 0]}>
-                        {ownerStats.map((e, i) => (
-                          <Cell key={i} fill={getColor(e.pct)} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <LazyOwnerBarChart data={ownerStats} />
                 </CardContent>
               </Card>
 
@@ -137,12 +137,11 @@ export default function OwnersPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {[...new Set(ownerFormMatrix.map(x => x.owner))].sort().map(owner => (
+                        {sortedOwners.map(owner => (
                           <tr key={owner}>
                             <td className="px-2 py-1 font-medium whitespace-nowrap">{owner}</td>
                             {visibleForms.map(f => {
-                              const item = ownerFormMatrix.find(x => x.owner === owner && x.form === f.name);
-                              const pct = item?.pct ?? 0;
+                              const pct = pctByOwnerForm.get(owner)?.get(f.name) ?? 0;
                               const bg = pct >= 80 ? 'bg-green-400' : pct >= 50 ? 'bg-yellow-300' : pct > 0 ? 'bg-red-300' : 'bg-zinc-100';
                               return (
                                 <td

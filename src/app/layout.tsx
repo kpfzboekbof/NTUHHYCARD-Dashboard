@@ -8,9 +8,15 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// `preload: false` — font-mono is used on /qc, /etiology, /heatmap,
+// /incomplete and /screening only, but the preload link was injected into
+// every route's <head> at High priority, competing with the render-blocking
+// CSS. The @font-face (with font-display: swap and a metric-adjusted
+// fallback) still ships, so those pages swap the glyphs in without shift.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  preload: false,
 });
 
 export const metadata: Metadata = {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchQcRecords, batchImportField } from '@/lib/redcap/client';
-import { clearAllCache } from '@/lib/cache';
+import { invalidate, COMPLETION_DERIVED } from '@/lib/cache';
 
 /**
  * POST /api/qc/fix
@@ -48,7 +48,9 @@ export async function POST(request: NextRequest) {
     }
 
     const updated = await batchImportField(records);
-    clearAllCache();
+    // This writes REDCap fields that feed the completion snapshot, so every
+    // cache derived from it must go — but `redcap_users` need not.
+    await invalidate(COMPLETION_DERIVED);
 
     return NextResponse.json({ updated, studyIds } satisfies FixResult);
   } catch (error) {

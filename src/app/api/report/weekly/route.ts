@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
-import { getAssignments, getTargetIds } from '@/lib/owner-store';
+import { getOwnerStore, pickTargetIds } from '@/lib/owner-store';
 import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
 import type { OwnerProductivity, User } from '@/types';
 
@@ -60,7 +60,8 @@ export async function GET(request: NextRequest) {
     const months = parseInt(searchParams.get('months') || '1');
     const staleDays = parseInt(searchParams.get('staleDays') || String(STALE_DAYS_DEFAULT));
 
-    const assignments = await getAssignments();
+    const store = await getOwnerStore();
+    const assignments = store.assignments ?? {};
 
     const rawUsers = await fetchUsers();
     const users: User[] = rawUsers.map(u => ({
@@ -68,11 +69,11 @@ export async function GET(request: NextRequest) {
       name: `${u.lastname}${u.firstname}`,
     }));
 
-    const [raw, coreAssistantStatus, outcomeStatus, targetIds] = await Promise.all([
+    const targetIds = pickTargetIds(store);
+    const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
       fetchCompletionStatus(),
       fetchCoreAssistantStatus(),
       fetchOutcomeStatus(),
-      getTargetIds(),
     ]);
     const completionRows = transformCompletion(raw, assignments, users, {
       coreAssistant: coreAssistantStatus,

@@ -14,8 +14,10 @@ export interface MeetingSettings {
   rsvps: Record<string, RsvpEntry>; // labelerCode (string) → RSVP entry
 }
 
+import { getRedis, isRedisEnabled } from '@/lib/redis';
+
 const REDIS_KEY = 'meeting-settings';
-const isVercel = !!process.env.VERCEL;
+const isVercel = isRedisEnabled;
 
 function emptySettings(): MeetingSettings {
   return { meetingDate: null, idFrom: null, idTo: null, reminderSentAt: null, rsvps: {} };
@@ -37,36 +39,21 @@ function normalize(raw: unknown): MeetingSettings {
 }
 
 async function readRedis(): Promise<MeetingSettings> {
-  let client;
   try {
-    const Redis = (await import('ioredis')).default;
-    client = new Redis(process.env.REDIS_URL || '', {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    await client.connect();
+    const client = await getRedis();
+    if (!client) return emptySettings();
     const raw = await client.get(REDIS_KEY);
     return normalize(raw ? JSON.parse(raw) : null);
-  } catch {
+  } catch (err) {
+    console.error('[meeting-store] redis read failed', err);
     return emptySettings();
-  } finally {
-    client?.disconnect();
   }
 }
 
 async function writeRedis(data: MeetingSettings): Promise<void> {
-  let client;
-  try {
-    const Redis = (await import('ioredis')).default;
-    client = new Redis(process.env.REDIS_URL || '', {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    await client.connect();
-    await client.set(REDIS_KEY, JSON.stringify(data));
-  } finally {
-    client?.disconnect();
-  }
+  const client = await getRedis();
+  if (!client) throw new Error('Redis unavailable — meeting settings not written');
+  await client.set(REDIS_KEY, JSON.stringify(data));
 }
 
 function readLocal(): MeetingSettings {

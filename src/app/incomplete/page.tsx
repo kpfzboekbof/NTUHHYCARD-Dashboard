@@ -7,7 +7,7 @@ import { useCompletionData } from '@/hooks/use-completion-data';
 import { useFilters } from '@/hooks/use-filters';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { filterRows } from '@/lib/filter-utils';
+import { filterRows, EMPTY_ROWS } from '@/lib/filter-utils';
 import { ExternalLink } from 'lucide-react';
 
 const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';
@@ -38,7 +38,10 @@ export default function IncompletePage() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
-  const rows = data?.rows ? filterRows(data.rows, filters) : [];
+  const rows = useMemo(
+    () => (data?.rows ? filterRows(data.rows, filters) : EMPTY_ROWS),
+    [data?.rows, filters],
+  );
   const hiddenForms = data?.hiddenForms ?? [];
   const visibleForms = FORMS.filter(f => !hiddenForms.includes(f.name));
 

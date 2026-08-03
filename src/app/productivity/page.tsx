@@ -1,10 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
-} from 'recharts';
+import { LazyProductivityTimelineChart } from '@/components/charts/lazy-charts';
 import { useCompletionData } from '@/hooks/use-completion-data';
 import { useLoggingData } from '@/hooks/use-logging-data';
 import { useFilters } from '@/hooks/use-filters';
@@ -256,34 +253,7 @@ export default function ProductivityPage() {
               </select>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={timelineData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="week"
-                    tickFormatter={v => {
-                      const d = new Date(v);
-                      return `${d.getMonth() + 1}/${d.getDate()}`;
-                    }}
-                    tick={{ fontSize: 11 }}
-                  />
-                  <YAxis />
-                  <Tooltip
-                    labelFormatter={v => {
-                      const d = new Date(v as string);
-                      return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} 週`;
-                    }}
-                    formatter={(v) => [v, '鍵入次數']}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="entries"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <LazyProductivityTimelineChart data={timelineData} />
             </CardContent>
           </Card>
         </div>

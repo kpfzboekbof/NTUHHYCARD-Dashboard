@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { cookies } from 'next/headers';
 import { getCachedAsync, setCached } from '@/lib/cache';
 import { fetchUsers } from '@/lib/redcap/client';
-import { getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
+import { getOwnerStore, pickTargetIds, setAssignments, setHiddenForms, setTargetIds } from '@/lib/owner-store';
 import { getLabelers, setLabelers } from '@/lib/labelers';
 import type { Labeler } from '@/lib/redcap/etiology-transform';
 import type { TargetIds } from '@/lib/owner-store';
@@ -20,20 +20,26 @@ async function getUsers(): Promise<User[]> {
     name: `${u.lastname}${u.firstname}`,
   }));
 
-  setCached(USERS_CACHE_KEY, users, 1800);
+  after(setCached(USERS_CACHE_KEY, users, 1800));
   return users;
 }
 
 export async function GET() {
   try {
-    const [users, assignments, hiddenForms, targetIds, labelers] = await Promise.all([
+    // One owner-store read instead of three separate round trips for the same
+    // JSON document.
+    const [users, store, labelers] = await Promise.all([
       getUsers(),
-      getAssignments(),
-      getHiddenForms(),
-      getTargetIds(),
+      getOwnerStore(),
       getLabelers(),
     ]);
-    return NextResponse.json({ users, assignments, hiddenForms, targetIds, labelers });
+    return NextResponse.json({
+      users,
+      assignments: store.assignments ?? {},
+      hiddenForms: store.hiddenForms ?? [],
+      targetIds: pickTargetIds(store),
+      labelers,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

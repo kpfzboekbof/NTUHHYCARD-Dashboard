@@ -8,7 +8,16 @@ services:
       - REDCAP_TOKEN=${REDCAP_TOKEN}
       - GMAIL_USER=${GMAIL_USER}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
+      # 站台層登入密碼（src/proxy.ts 的 user_token 閘門）。未設定時每個頁面
+      # 都會被導向 /login，而 /api/user-auth 會回 500，等於整個站台進不去。
+      - USER_PASSWORD=${USER_PASSWORD}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - SCREENING_API_TOKEN=${SCREENING_API_TOKEN}
       - REPORT_API_TOKEN=${REPORT_API_TOKEN}
+    volumes:
+      # 沒有掛載時，負責人指派、labeler 名單與共識會議設定會寫進容器的可寫層
+      # （owner-store / labelers / meeting-store 在非 Vercel 環境會落地成
+      # process.cwd()/data 底下的 JSON），docker compose up --build 之後就消失。
+      # Dockerfile 的 WORKDIR 是 /app，server.js 也從 /app 啟動，所以 cwd 是 /app。
+      - ./data:/app/data
     restart: unless-stopped

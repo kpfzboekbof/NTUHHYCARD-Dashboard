@@ -3,6 +3,7 @@ import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers, fetchTraumaEligibleIds } from '@/lib/redcap/client';
 import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
 import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import type { CompletionResponse, User } from '@/types';
 
 const CACHE_KEY = 'completion';
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
       targetIds: await getTargetIds(),
       totalRecords: allStudyIds.size,
       validOhcaCount: validStudyIds.size,
+      redcapBaseUrl: await getDataEntryBase(),
       fetchedAt: new Date().toISOString(),
     };
 

@@ -10,9 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { filterRows } from '@/lib/filter-utils';
 import { ExternalLink } from 'lucide-react';
 
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';
-const REDCAP_PID = '8207';
-
 /** Map virtual form names to real REDCap form page names */
 function toRedcapFormName(form: string): string {
   if (form === 'ntuh_nhi_core_assistant' || form === 'ntuh_nhi_core_doctor') return 'ntuh_nhi_core';
@@ -20,9 +17,10 @@ function toRedcapFormName(form: string): string {
   return form;
 }
 
-function redcapRecordUrl(studyId: string, form: string): string {
-  const page = toRedcapFormName(form);
-  return `${REDCAP_BASE}/redcap_v16.1.9/DataEntry/index.php?pid=${REDCAP_PID}&id=${studyId}&page=${page}`;
+// The base comes from the API, which reads REDCap's version: the path contains
+// it, so pinning a version here breaks every link on the next upgrade.
+function redcapRecordUrl(base: string, studyId: string, form: string): string {
+  return `${base}&id=${encodeURIComponent(studyId)}&page=${encodeURIComponent(toRedcapFormName(form))}`;
 }
 
 export default function IncompletePage() {
@@ -43,6 +41,7 @@ export default function IncompletePage() {
   const visibleForms = FORMS.filter(f => !hiddenForms.includes(f.name));
 
   const targetIds = data?.targetIds;
+  const redcapBase = data?.redcapBaseUrl;
   const targetId = targetIds ? Math.max(targetIds.basic ?? 0, targetIds.exam ?? 0) : 0;
 
   const incompleteRows = useMemo(() => {
@@ -154,7 +153,7 @@ export default function IncompletePage() {
                           }`}
                           onClick={() => {
                             setLastVisited(rowKey);
-                            window.open(redcapRecordUrl(r.studyId, r.form), '_blank');
+                            if (redcapBase) window.open(redcapRecordUrl(redcapBase, r.studyId, r.form), '_blank');
                           }}
                         >
                           <td className="px-3 py-1.5 font-mono text-xs text-blue-600 flex items-center gap-1">

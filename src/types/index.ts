@@ -98,6 +98,8 @@ export interface CompletionResponse {
   targetIds: { basic: number | null; exam: number | null };
   totalRecords: number;
   validOhcaCount: number;
+  /** Data-entry deep-link base, built from REDCap's reported version. */
+  redcapBaseUrl: string;
   fetchedAt: string;
 }
 
@@ -130,6 +132,8 @@ export interface QcResponse {
   recordFlags: QcRecordFlag[];
   behaviorFlags: QcBehaviorFlag[];
   fetchedAt: string;
+  /** Data-entry deep-link base, built from REDCap’s reported version. */
+  redcapBaseUrl: string;
 }
 
 // ============================================================

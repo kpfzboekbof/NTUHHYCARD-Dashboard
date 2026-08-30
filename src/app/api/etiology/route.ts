@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
       records,
       stats,
       labelers,
+      redcapBaseUrl: await getDataEntryBase(),
       fetchedAt: new Date().toISOString(),
     };
 

@@ -6,6 +6,7 @@ import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
@@ -153,6 +154,7 @@ export async function POST(request: NextRequest) {
       const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
       const baseUrl = await resolveBaseUrl();
+      const redcapBaseUrl = await getDataEntryBase();
 
       // Optional: only send to specific labeler codes
       const targetCodes: number[] | undefined = body.labelerCodes;
@@ -180,6 +182,7 @@ export async function POST(request: NextRequest) {
             labelerCode: labeler.code,
             signature: signRsvp(labeler.code, settings.meetingDate),
           },
+          redcapBaseUrl,
         );
 
         try {

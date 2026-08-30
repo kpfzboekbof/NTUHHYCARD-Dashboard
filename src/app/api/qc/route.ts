@@ -7,6 +7,7 @@ import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus } f
 import { transformCompletion } from '@/lib/redcap/transform';
 import { runRecordChecks, runBehaviorChecks } from '@/lib/redcap/qc-checks';
 import type { CompletionResponse, User, QcResponse } from '@/types';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 
 const CACHE_KEY = 'qc';
 const USERS_CACHE_KEY = 'redcap_users';
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest) {
     const data: QcResponse = {
       recordFlags,
       behaviorFlags,
+      redcapBaseUrl: await getDataEntryBase(),
       fetchedAt: new Date().toISOString(),
     };
 

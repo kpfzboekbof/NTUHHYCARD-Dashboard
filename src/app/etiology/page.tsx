@@ -735,7 +735,7 @@ export default function EtiologyPage() {
                               className={`px-3 py-1.5 font-mono sticky left-0 z-10 cursor-pointer hover:underline text-blue-600 ${stickyBg} ${isConsensus ? 'text-lg font-semibold' : 'text-xs'}`}
                               onClick={() => {
                                 setLastVisited(r.studyId);
-                                window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank');
+                                if (data?.redcapBaseUrl) window.open(`${data.redcapBaseUrl}&id=${encodeURIComponent(r.studyId)}&page=ntuh_nhi_etiology`, '_blank');
                               }}
                             >{r.studyId}</td>
 

@@ -323,3 +323,23 @@ export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[
   }
   return JSON.parse(text);
 }
+
+/** REDCap's own version string, e.g. "17.4.1". */
+export async function fetchRedcapVersion(): Promise<string> {
+  const res = await redcapPost({ content: 'version' });
+  return (await res.text()).trim();
+}
+
+/** Project metadata (the data dictionary). */
+export async function fetchMetadata(): Promise<RedcapRow[]> {
+  const res = await redcapPost({ content: 'metadata', format: 'json' });
+  const parsed = await redcapJson(res);
+  return Array.isArray(parsed) ? parsed.map(normalizeRow) : [];
+}
+
+/** Project info — used for the project id in deep links. */
+export async function fetchProjectInfo(): Promise<RedcapRow> {
+  const res = await redcapPost({ content: 'project', format: 'json' });
+  const parsed = await redcapJson(res);
+  return normalizeRow(Array.isArray(parsed) ? parsed[0] : parsed);
+}

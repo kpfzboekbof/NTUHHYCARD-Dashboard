@@ -8,11 +8,10 @@ import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity
 import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/config/qc-checks';
 import { HOSPITALS } from '@/config/hospitals';
 
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';
-const REDCAP_PID = '8207';
-
-function redcapRecordUrl(studyId: string, page: string): string {
-  return `${REDCAP_BASE}/redcap_v16.1.9/DataEntry/index.php?pid=${REDCAP_PID}&id=${studyId}&page=${page}`;
+// The base comes from the API, which reads REDCap's version: the path contains
+// it, so pinning a version here breaks every link on the next upgrade.
+function redcapRecordUrl(base: string, studyId: string, page: string): string {
+  return `${base}&id=${encodeURIComponent(studyId)}&page=${encodeURIComponent(page)}`;
 }
 
 const ALL_CHECK_META = [...QC_CHECK_META, ...BEHAVIOR_CHECK_META];
@@ -284,7 +283,7 @@ export default function QcPage() {
                             onClick={() => {
                               if (hasLink) {
                                 setLastVisited(f.key);
-                                window.open(redcapRecordUrl(f.studyId!, f.redcapPage!), '_blank');
+                                if (data?.redcapBaseUrl) window.open(redcapRecordUrl(data.redcapBaseUrl, f.studyId!, f.redcapPage!), '_blank');
                               }
                             }}
                           >

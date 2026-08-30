@@ -19,12 +19,14 @@ export interface VersionedDoc<T> {
 }
 
 export class VersionConflictError extends Error {
-  constructor(
-    readonly expectedVersion: number,
-    readonly currentVersion: number,
-  ) {
+  readonly expectedVersion: number;
+  readonly currentVersion: number;
+
+  constructor(expectedVersion: number, currentVersion: number) {
     super(`版本衝突：預期 ${expectedVersion}，目前 ${currentVersion}`);
     this.name = 'VersionConflictError';
+    this.expectedVersion = expectedVersion;
+    this.currentVersion = currentVersion;
   }
 }
 

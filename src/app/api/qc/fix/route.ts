@@ -9,7 +9,7 @@ import { clearAllCache } from '@/lib/cache';
  * Batch-fix known QC issues by importing corrected values into REDCap.
  */
 
-type FixResult = { updated: number; studyIds: string[] };
+type FixResult = { updated: number; studyIds: string[]; missing: string[] };
 
 const FIX_HANDLERS: Record<string, (rows: Record<string, string>[]) => { records: Array<{ study_id: string; [k: string]: string }>; studyIds: string[] }> = {
   // B1: prehos_rosc_core=1 but ever_rosc=0 → set ever_rosc=1
@@ -41,16 +41,21 @@ export async function POST(request: NextRequest) {
     }
 
     const qcRows = await fetchQcRecords();
-    const { records, studyIds } = FIX_HANDLERS[checkId](qcRows);
+    const { records } = FIX_HANDLERS[checkId](qcRows);
 
     if (records.length === 0) {
-      return NextResponse.json({ updated: 0, studyIds: [] } satisfies FixResult);
+      return NextResponse.json({ updated: 0, studyIds: [], missing: [] } satisfies FixResult);
     }
 
-    const updated = await batchImportField(records);
+    // Report the records REDCap confirmed, not the ones we asked it to write.
+    const { imported, missing } = await batchImportField(records);
     clearAllCache();
 
-    return NextResponse.json({ updated, studyIds } satisfies FixResult);
+    return NextResponse.json({
+      updated: imported.length,
+      studyIds: imported,
+      missing,
+    } satisfies FixResult);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

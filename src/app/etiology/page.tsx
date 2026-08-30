@@ -284,9 +284,17 @@ export default function EtiologyPage() {
         alert(d.error || '上傳失敗');
         return;
       }
-      applyFinalLocally(updates);
+      // Only clear rows REDCap confirmed; unconfirmed ones stay in the list.
+      const confirmed: string[] = Array.isArray(d.imported) ? d.imported : updates.map(u => u.studyId);
+      const confirmedSet = new Set(confirmed);
+      applyFinalLocally(updates.filter(u => confirmedSet.has(u.studyId)));
       setShowBatchPreview(false);
-      alert(`已上傳 ${d.count ?? updates.length} 筆共識結果到 REDCap`);
+      const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
+      alert(
+        missing.length > 0
+          ? `已上傳 ${confirmed.length} 筆共識結果到 REDCap。\n未確認 ${missing.length} 筆，仍留在清單中：${missing.join(', ')}`
+          : `已上傳 ${confirmed.length} 筆共識結果到 REDCap`
+      );
     } catch {
       alert('網路錯誤，請稍後再試');
     } finally {

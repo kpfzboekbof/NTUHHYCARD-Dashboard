@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMeetingSettings, setMeetingSettings, type RsvpResponse } from '@/lib/meeting-store';
+import { updateMeetingSettings, type RsvpResponse } from '@/lib/meeting-store';
 import { getLabelers } from '@/lib/labelers';
 import { verifyRsvp } from '@/lib/rsvp-token';
 
@@ -64,19 +64,25 @@ export async function GET(request: NextRequest) {
     }), 401);
   }
 
-  const [labelers, settings] = await Promise.all([getLabelers(), getMeetingSettings()]);
+  const labelers = await getLabelers();
   const labeler = labelers.find(l => l.code === code);
   const labelerName = labeler?.name ?? `Labeler ${code}`;
 
   // Persist the response keyed by labeler. The entry stores its meetingDate so
-  // the dashboard can ignore RSVPs from previous meetings.
-  settings.rsvps = { ...settings.rsvps };
-  settings.rsvps[String(code)] = {
-    response,
-    respondedAt: new Date().toISOString(),
-    meetingDate: meeting,
-  };
-  await setMeetingSettings(settings);
+  // the dashboard can ignore RSVPs from previous meetings. Writing through
+  // updateMeetingSettings keeps a simultaneous admin edit of the meeting date
+  // from being overwritten by this labeler's reply, and vice versa.
+  const settings = await updateMeetingSettings(current => ({
+    ...current,
+    rsvps: {
+      ...current.rsvps,
+      [String(code)]: {
+        response,
+        respondedAt: new Date().toISOString(),
+        meetingDate: meeting,
+      },
+    },
+  }));
 
   const isYes = response === 'yes';
   const isStale = settings.meetingDate && settings.meetingDate !== meeting;

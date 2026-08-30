@@ -79,6 +79,28 @@ test('unparseable applicability expressions are rejected', () => {
   assert.ok(issues.some(i => i.message.includes('適用條件無法解析')));
 });
 
+test('an expression that parses but is not a condition is rejected', () => {
+  // `studyIdNum` alone parses fine and would only fail at derivation time,
+  // where it would take out the whole matrix rather than one unit.
+  const issues = validateCatalog(docOf([
+    unit('a', { applicability: { expr: 'studyIdNum', gatingFields: [] } }),
+  ]));
+  assert.ok(issues.some(i => i.message.includes('必須是一個條件')));
+});
+
+test('a non-condition variant guard is rejected too', () => {
+  const issues = validateCatalog(docOf([
+    unit('a', {
+      kind: 'field_group',
+      completionRule: {
+        type: 'required_fields',
+        variants: [{ when: 'studyIdNum', fields: ['x'] }, { when: 'else', fields: ['y'] }],
+      },
+    }),
+  ]));
+  assert.ok(issues.some(i => i.message.includes('必須是一個條件')));
+});
+
 test('completion rule must match the unit kind', () => {
   const issues = validateCatalog(docOf([
     unit('a', { kind: 'verify', completionRule: { type: 'complete_field', completeField: 'x' } }),

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -23,11 +23,24 @@ const aliases = Object.entries(paths)
 
 const EXTENSIONS = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'];
 
-/** First existing file for a base URL, trying each extension in turn. */
+function isFile(url) {
+  try {
+    return statSync(fileURLToPath(url)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * First existing *file* for a base URL, trying each extension in turn.
+ *
+ * The directory check matters: `@/types` is a directory containing index.ts,
+ * and accepting the bare directory would hand Node a path it refuses to import.
+ */
 function findFile(base) {
   for (const extension of EXTENSIONS) {
     const candidate = new URL(`${base.href}${extension}`);
-    if (existsSync(fileURLToPath(candidate))) return candidate.href;
+    if (isFile(candidate)) return candidate.href;
   }
   return undefined;
 }

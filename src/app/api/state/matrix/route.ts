@@ -7,18 +7,19 @@ import { getAssignments } from '@/lib/owner-store';
 import { getLabelers } from '@/lib/labelers';
 import { buildMatrix } from '@/lib/state/matrix';
 import { catalogFieldSet } from '@/lib/state/snapshot';
-import type { CellState, WorkState } from '@/lib/state/types';
+import type { CellState, RecordDerivation, WorkState } from '@/lib/state/types';
 import type { User } from '@/types';
 
 /**
  * GET /api/state/matrix
  *
  * The single read API behind every work-state view. Returns per-unit counts
- * for the whole registry plus a filtered, paged slice of individual cells —
- * the full matrix is ~200k cells at target size, far too much for one payload.
+ * for the whole registry plus a filtered, paged slice of individual cells: at
+ * target size the matrix is ~200k cells, far more than one response should
+ * carry, so cells are always filtered and paged.
  *
- * Filters: unit, state, hospital, owner, screeningPending, blocked.
- * Paging: limit (default 500, max 2000), offset.
+ * Filters: unit, state, hospital, owner. Paging: limit (default 500, max 2000)
+ * and offset. `noCache=1` forces a re-derivation.
  */
 
 const CACHE_KEY = 'state-matrix';
@@ -42,9 +43,15 @@ interface UnitSummary {
   counts: Record<WorkState, number>;
 }
 
+/**
+ * What gets cached: the compact per-record derivation plus per-unit rollups.
+ * Owner and hospital stay out of the cells — repeating them across every cell
+ * would multiply the cached payload for values that are per-unit and
+ * per-record. They are attached to the page of cells actually returned.
+ */
 interface MatrixSnapshot {
+  records: RecordDerivation[];
   units: UnitSummary[];
-  cells: Array<CellState & { hospital: number; owner: string }>;
   totals: {
     records: number;
     excluded: number;
@@ -54,6 +61,7 @@ interface MatrixSnapshot {
   };
   catalogVersion: number;
   catalogIsSeed: boolean;
+  catalogReadFailed: boolean;
   fetchedAt: string;
 }
 
@@ -65,7 +73,7 @@ function emptyCounts(): Record<WorkState, number> {
 }
 
 async function buildSnapshot(): Promise<MatrixSnapshot> {
-  const [{ catalog, version, isSeed }, assignments, labelers] = await Promise.all([
+  const [{ catalog, version, isSeed, readFailed }, assignments, labelers] = await Promise.all([
     getCatalogSource(),
     getAssignments(),
     getLabelers(),
@@ -85,31 +93,27 @@ async function buildSnapshot(): Promise<MatrixSnapshot> {
 
   const { records } = buildMatrix({ catalog, rows, etiologyRows, labelers });
 
-  // Owners still come from the form-keyed assignment map. Phase 5 replaces
-  // this with assignment rules; the shape of the response does not change.
-  const ownerOf = new Map<string, string>();
-  for (const unit of catalog.units) {
-    const formName = LEGACY_FORM_BY_UNIT_ID[unit.unitId] ?? unit.unitId;
-    const username = assignments[formName];
-    const user = username ? users.find(u => u.username === username) : undefined;
-    ownerOf.set(unit.unitId, user?.name || username || UNASSIGNED);
-  }
-
+  // Owners still come from the form-keyed assignment map. Phase 5 replaces this
+  // with assignment rules; the shape of the response does not change.
   const visibleUnits = catalog.units.filter(u => !u.hidden);
   const summaries = new Map<string, UnitSummary>(
-    visibleUnits.map(unit => [unit.unitId, {
-      unitId: unit.unitId,
-      label: unit.label,
-      redcapForm: unit.redcapForm,
-      deepLinkPage: unit.deepLinkPage,
-      category: unit.category,
-      sortOrder: unit.sortOrder,
-      owner: ownerOf.get(unit.unitId) ?? UNASSIGNED,
-      counts: emptyCounts(),
-    }]),
+    visibleUnits.map(unit => {
+      const formName = LEGACY_FORM_BY_UNIT_ID[unit.unitId] ?? unit.unitId;
+      const username = assignments[formName];
+      const user = username ? users.find(u => u.username === username) : undefined;
+      return [unit.unitId, {
+        unitId: unit.unitId,
+        label: unit.label,
+        redcapForm: unit.redcapForm,
+        deepLinkPage: unit.deepLinkPage,
+        category: unit.category,
+        sortOrder: unit.sortOrder,
+        owner: user?.name || username || UNASSIGNED,
+        counts: emptyCounts(),
+      }];
+    }),
   );
 
-  const cells: MatrixSnapshot['cells'] = [];
   let excluded = 0;
   let screeningPending = 0;
   let fullyComplete = 0;
@@ -127,16 +131,16 @@ async function buildSnapshot(): Promise<MatrixSnapshot> {
     for (const cell of record.cells) {
       const summary = summaries.get(cell.unitId);
       if (summary) summary.counts[cell.state] += 1;
-      cells.push({ ...cell, hospital: record.hospital, owner: ownerOf.get(cell.unitId) ?? UNASSIGNED });
     }
   }
 
   return {
+    records,
     units: [...summaries.values()].sort((a, b) => a.sortOrder - b.sortOrder),
-    cells,
     totals: { records: records.length, excluded, screeningPending, fullyComplete },
     catalogVersion: version,
     catalogIsSeed: isSeed,
+    catalogReadFailed: readFailed,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -167,22 +171,38 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const filtered = snapshot.cells.filter(cell => {
-      if (unit && cell.unitId !== unit) return false;
-      if (state && cell.state !== state) return false;
-      if (hospital && String(cell.hospital) !== hospital) return false;
-      if (owner && cell.owner !== owner) return false;
-      return true;
-    });
+    const ownerByUnit = new Map(snapshot.units.map(u => [u.unitId, u.owner]));
+
+    // Collect only the requested window rather than materialising every match.
+    const page: Array<CellState & { hospital: number; owner: string }> = [];
+    let matched = 0;
+
+    for (const record of snapshot.records) {
+      if (hospital && String(record.hospital) !== hospital) continue;
+
+      for (const cell of record.cells) {
+        if (unit && cell.unitId !== unit) continue;
+        if (state && cell.state !== state) continue;
+
+        const cellOwner = ownerByUnit.get(cell.unitId) ?? UNASSIGNED;
+        if (owner && cellOwner !== owner) continue;
+
+        if (matched >= offset && page.length < limit) {
+          page.push({ ...cell, hospital: record.hospital, owner: cellOwner });
+        }
+        matched++;
+      }
+    }
 
     return NextResponse.json({
       units: snapshot.units,
       totals: snapshot.totals,
       catalogVersion: snapshot.catalogVersion,
       catalogIsSeed: snapshot.catalogIsSeed,
+      catalogReadFailed: snapshot.catalogReadFailed,
       fetchedAt: snapshot.fetchedAt,
-      cells: filtered.slice(offset, offset + limit),
-      matched: filtered.length,
+      cells: page,
+      matched,
       offset,
       limit,
     });

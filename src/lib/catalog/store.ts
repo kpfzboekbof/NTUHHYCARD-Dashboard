@@ -29,12 +29,21 @@ export interface CatalogSource {
   /** Version 0 with `isSeed` means nothing has been saved yet. */
   version: number;
   isSeed: boolean;
+  /**
+   * The store could not be read, so the seed is standing in for whatever is
+   * actually saved. Callers surface this: silently deriving every cell from
+   * the wrong rules would be worse than showing the dashboard is degraded.
+   */
+  readFailed: boolean;
 }
 
 export async function getCatalogSource(): Promise<CatalogSource> {
   const { version, data } = await store.read();
-  if (!data) return { catalog: buildSeedCatalog(), version: 0, isSeed: true };
-  return { catalog: data, version, isSeed: false };
+  const readFailed = version < 0;
+  if (!data) {
+    return { catalog: buildSeedCatalog(), version: readFailed ? -1 : 0, isSeed: true, readFailed };
+  }
+  return { catalog: data, version, isSeed: false, readFailed: false };
 }
 
 export async function getCatalog(): Promise<CatalogDoc> {

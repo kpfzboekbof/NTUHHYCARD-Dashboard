@@ -253,7 +253,21 @@ export function deriveRecord(snapshot: RecordSnapshot, options: DeriveOptions): 
     }
     inProgress.add(unitId);
 
-    const cell = derive(unit);
+    let cell: CellState;
+    try {
+      cell = derive(unit);
+    } catch (error) {
+      // A malformed expression is rejected when the catalog is saved, but one
+      // stored before that validation existed must not take the whole matrix
+      // down with it: block just this cell and name the reason.
+      const detail = error instanceof Error ? error.message : String(error);
+      cell = {
+        studyId: snapshot.studyId,
+        unitId,
+        state: 'blocked',
+        blockReason: { kind: 'awaiting_config', detail },
+      };
+    }
     inProgress.delete(unitId);
     resolved.set(unitId, cell);
     return cell;

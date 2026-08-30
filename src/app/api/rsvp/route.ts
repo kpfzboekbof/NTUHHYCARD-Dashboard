@@ -64,25 +64,37 @@ export async function GET(request: NextRequest) {
     }), 401);
   }
 
-  const labelers = await getLabelers();
-  const labeler = labelers.find(l => l.code === code);
-  const labelerName = labeler?.name ?? `Labeler ${code}`;
+  let labelerName = `Labeler ${code}`;
+  let settings;
+  try {
+    const labelers = await getLabelers();
+    labelerName = labelers.find(l => l.code === code)?.name ?? labelerName;
 
-  // Persist the response keyed by labeler. The entry stores its meetingDate so
-  // the dashboard can ignore RSVPs from previous meetings. Writing through
-  // updateMeetingSettings keeps a simultaneous admin edit of the meeting date
-  // from being overwritten by this labeler's reply, and vice versa.
-  const settings = await updateMeetingSettings(current => ({
-    ...current,
-    rsvps: {
-      ...current.rsvps,
-      [String(code)]: {
-        response,
-        respondedAt: new Date().toISOString(),
-        meetingDate: meeting,
+    // Persist the response keyed by labeler. The entry stores its meetingDate
+    // so the dashboard can ignore RSVPs from previous meetings. Writing through
+    // updateMeetingSettings keeps a simultaneous admin edit of the meeting date
+    // from being overwritten by this labeler's reply, and vice versa.
+    settings = await updateMeetingSettings(current => ({
+      ...current,
+      rsvps: {
+        ...current.rsvps,
+        [String(code)]: {
+          response,
+          respondedAt: new Date().toISOString(),
+          meetingDate: meeting,
+        },
       },
-    },
-  }));
+    }));
+  } catch {
+    // This link is opened from an email by someone who cannot see a JSON error,
+    // so a storage failure has to answer in the same friendly page as the rest.
+    return send(htmlPage({
+      title: 'RSVP — 暫時無法記錄',
+      heading: '暫時無法記錄您的回覆',
+      message: `${labelerName} 您好，系統暫時無法儲存回覆。請稍後再點一次信中的按鈕；若持續失敗，請直接聯絡管理員。`,
+      accent: 'amber',
+    }), 503);
+  }
 
   const isYes = response === 'yes';
   const isStale = settings.meetingDate && settings.meetingDate !== meeting;

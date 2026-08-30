@@ -1,4 +1,4 @@
-import { parseExpr, ExprError } from './expr';
+import { parseExpr, ExprError, type Node } from './expr';
 import type { CatalogDoc, WorkUnit } from './types';
 
 /**
@@ -17,6 +17,29 @@ export interface CatalogIssue {
 
 /** Dependency types that can stop work from starting. */
 const BLOCKING = new Set(['data_gate', 'verify_after']);
+
+/** AST roots that evaluate to a condition rather than to a bare value. */
+const CONDITION_KINDS = new Set<Node['kind']>(['bool', 'compare', 'and', 'or', 'field']);
+
+/**
+ * Parse an expression and check it can actually be evaluated as a condition.
+ *
+ * `studyIdNum` parses fine but is a value, not a test — accepting it here would
+ * push the failure into derivation, where it takes out the whole matrix.
+ */
+function checkCondition(expr: string, label: string, unitId: string, issues: CatalogIssue[]): void {
+  let node: Node;
+  try {
+    node = parseExpr(expr);
+  } catch (error) {
+    const detail = error instanceof ExprError ? error.message : String(error);
+    issues.push({ unitId, message: `${label}無法解析：${detail}` });
+    return;
+  }
+  if (!CONDITION_KINDS.has(node.kind)) {
+    issues.push({ unitId, message: `${label}必須是一個條件（例如 sur_icu == '1'），而不是單一數值` });
+  }
+}
 
 function validateCompletionRule(unit: WorkUnit, issues: CatalogIssue[]): void {
   const rule = unit.completionRule;
@@ -48,12 +71,7 @@ function validateCompletionRule(unit: WorkUnit, issues: CatalogIssue[]): void {
         }
         return;
       }
-      try {
-        parseExpr(variant.when);
-      } catch (error) {
-        const detail = error instanceof ExprError ? error.message : String(error);
-        issues.push({ unitId: unit.unitId, message: `variant ${index} 條件無法解析：${detail}` });
-      }
+      checkCondition(variant.when, `variant ${index} 條件`, unit.unitId, issues);
     });
     if (rule.variants[rule.variants.length - 1].when !== 'else') {
       issues.push({ unitId: unit.unitId, message: '必填欄位規則需要一個「else」variant 作為預設' });
@@ -133,12 +151,7 @@ export function validateCatalog(catalog: CatalogDoc): CatalogIssue[] {
       issues.push({ unitId: unit.unitId, message: 'unitId / label / redcapForm / deepLinkPage 都是必填' });
     }
 
-    try {
-      parseExpr(unit.applicability.expr);
-    } catch (error) {
-      const detail = error instanceof ExprError ? error.message : String(error);
-      issues.push({ unitId: unit.unitId, message: `適用條件無法解析：${detail}` });
-    }
+    checkCondition(unit.applicability.expr, '適用條件', unit.unitId, issues);
 
     for (const gate of unit.applicability.gatingFields) {
       if (!seen.has(gate.enteredByUnit) && !units.some(u => u.unitId === gate.enteredByUnit)) {

@@ -205,6 +205,23 @@ test('derivation is pure, so two runs can be diffed for handoff events', () => {
   assert.deepEqual(first, second);
 });
 
+test('a broken unit blocks only itself, not the whole record', () => {
+  // Validation rejects this on save, but a catalog stored before that check
+  // existed must not take every other cell down with it.
+  const broken = units.map(u =>
+    u.unitId === 'ntuh_nhi_patient'
+      ? { ...u, applicability: { expr: 'studyIdNum', gatingFields: [] } }
+      : u,
+  );
+  const derived = deriveRecord(snapshot({ ntuh_nhi_lab_ed_complete: '2' }), { units: broken });
+
+  const bad = derived.cells.find(c => c.unitId === 'ntuh_nhi_patient')!;
+  assert.equal(bad.state, 'blocked');
+  assert.equal(bad.blockReason?.kind, 'awaiting_config');
+
+  assert.equal(derived.cells.find(c => c.unitId === 'ntuh_nhi_lab_ed')!.state, 'complete');
+});
+
 test('every unit in the catalog gets exactly one cell', () => {
   const { derived } = statesOf({});
   assert.equal(derived.cells.length, units.length);

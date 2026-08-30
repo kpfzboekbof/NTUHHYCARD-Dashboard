@@ -101,17 +101,18 @@ async function fetchLogWindow(begin, end) {
 
 async function fetchAllLogs(months) {
   const now = new Date();
-  const start = new Date(now);
-  start.setMonth(start.getMonth() - months);
+  // 對齊到月初再往前推，否則 setMonth 在月底會溢位（1/31 + 1 月 = 3/2），
+  // 視窗長度會漂移、進度標示也會跳掉月份
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, 1));
 
   const all = [];
-  let cursor = new Date(start);
+  let cursor = start;
   while (cursor < now) {
-    const next = new Date(cursor);
-    next.setMonth(next.getMonth() + 1);
+    const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
     const end = next < now ? next : now;
     const batch = await fetchLogWindow(cursor, end);
-    all.push(...batch);
+    // 單月可達上萬筆，all.push(...batch) 會爆 call stack，逐筆推入
+    for (const entry of batch) all.push(entry);
     process.stderr.write(`  ${cursor.toISOString().slice(0, 7)}: ${batch.length} 筆\n`);
     cursor = next;
   }
@@ -120,7 +121,17 @@ async function fetchAllLogs(months) {
 
 /* ── 日誌解析 ───────────────────────────────────────────── */
 
-const RECORD_ACTION = /(update|create|save)\s+record/i;
+// 這個 REDCap 是繁中介面，action 寫成「更新紀錄 7073」「建立紀錄 (import) 812」，
+// 不是英文的 "Update record"；兩種語系都收，避免換語系就整份統計歸零。
+const RECORD_ACTION = /(update|create|save)\s+record|更新紀錄|建立紀錄|儲存紀錄/i;
+
+// 括號標記代表非人工輸入：API 上傳、CSV 匯入、REDCap 自動計算欄位。
+// 這些是資料管線寫的，不能算成「誰負責填這張表」。
+const AUTOMATED_ACTION = /\((API|import|Auto calculation)\)/i;
+
+// REDCap 以「SYSTEM (某帳號)」記錄背景規則跑出來的異動，掛的是規則建立者的帳號，
+// 不是他本人在填表；不排掉的話會變成編輯量第二名的「人」。
+const SYSTEM_USER = /^SYSTEM\b/i;
 
 /**
  * details 形如：
@@ -138,6 +149,47 @@ function parseChangedFields(details) {
   }
   return Array.from(fields);
 }
+
+/*
+ * dashboard 的 /assign 頁把 ntuh_nhi_core、ntuh_nhi_outcome 各拆成幾張「虛擬表單」
+ * 分開指派負責人，但 REDCap 日誌只知道實體表單。這裡照 src/config/forms.ts 的欄位
+ * 定義把日誌事件拆回虛擬表單，報告才對得上 /assign 上的列。
+ * 欄位有異動時需與 src/config/forms.ts 同步。
+ */
+const CORE_ASSISTANT_FIELDS = new Set([
+  'place_core', 'witnessed_core', 'bystander_core', 'pad_core',
+  'manual_core', 'mcc_core', 'aed_core', 'airway_core', 'bosmin_core',
+  'emt_core', 'emtp_core', 'prehos_rosc_core',
+]);
+const OUTCOME_ASSISTANT_FIELDS = new Set([
+  'ini_dnr', 'mid_dnr', 'defibrillation', 'ever_rosc', 'any_rosc',
+  'duration', 'sur_icu', 'sur_dis', 'back_ed', 'back_opd', 'back_ward', 'cost',
+]);
+
+function virtualForm(form, field) {
+  if (form === 'ntuh_nhi_core') {
+    return CORE_ASSISTANT_FIELDS.has(field) ? 'ntuh_nhi_core_assistant' : 'ntuh_nhi_core_doctor';
+  }
+  if (form === 'ntuh_nhi_outcome') {
+    if (field === 'etiology_final') return 'ntuh_nhi_outcome_etiology';
+    return OUTCOME_ASSISTANT_FIELDS.has(field) ? 'ntuh_nhi_outcome_assistant' : 'ntuh_nhi_outcome_doctor';
+  }
+  return form;
+}
+
+/** /assign 頁列出的表單；用來找出「設定裡有、但日誌完全沒動靜」的表單 */
+const CONFIGURED_FORMS = [
+  'ntuh_nhi_patient', 'ntuh_nhi_basic_info_38971b', 'ntuh_nhi_predisease',
+  'ntuh_nhi_preohca_hos_use', 'ntuh_nhi_core_assistant', 'ntuh_nhi_core_doctor',
+  'ntuh_nhi_core_cpr', 'h14trauma_ohca_transfusion', 'ntuh_nhi_lab_ed',
+  'ntuh_nhi_lab_icu', 'ntuh_nhi_postarrest_care', 'ntuh_nhi_examcheck',
+  'ntuh_exam_cag', 'ntuh_exam_ucg', 'ntuh_exam_abd_echo', 'ntuh_exam_pes',
+  'ntuh_exam_colon', 'ntuh_nhi_op', 'ntuh_exam_patho', 'ntuh_exam_lft_2',
+  'ntuh_exam_eeg', 'ntuh_exam_holtertreadmill', 'ntuh_nhi_etiology',
+  'ntuh_nhi_outcome_assistant', 'ntuh_nhi_outcome_doctor', 'ntuh_nhi_outcome_etiology',
+  'ntuh_nhi_discharge', 'h6_validation_add', 'h12_ed_manage_short_outcome',
+  'ntuh_nhi_environment', 'h20_mtdna',
+];
 
 /** 這些欄位每次存檔都會被帶到，對「誰負責」沒有鑑別度 */
 const NOISE_FIELDS = new Set([
@@ -259,6 +311,18 @@ const VERDICT_LABEL = {
   'no-data': '無紀錄',
 };
 
+/**
+ * 表單有歷史編輯、但近期完全沒人動時，只寫「無紀錄」會被誤讀成這張表沒人填過。
+ * 這種情況標成停用並改用全期結論。
+ */
+function display(item) {
+  const stale = item.recent.verdict === 'no-data' && item.overall.verdict !== 'no-data';
+  if (stale) {
+    return { label: `近期無異動（全期${VERDICT_LABEL[item.overall.verdict]}）`, owners: item.overall.owners };
+  }
+  return { label: VERDICT_LABEL[item.recent.verdict], owners: item.recent.owners };
+}
+
 function fmtRanked(ranked, limit = 4) {
   return ranked.slice(0, limit)
     .map(r => `${r.name} ${(r.share * 100).toFixed(0)}%（${r.events}）`)
@@ -271,7 +335,7 @@ function buildMarkdown(result) {
   L.push('');
   L.push(`- 產生時間：${result.generatedAt}`);
   L.push(`- 回看區間：近 ${result.params.months} 個月（近期定義為最後 ${result.params.recentMonths} 個月）`);
-  L.push(`- 日誌筆數：${result.totals.logEntries}（其中資料異動 ${result.totals.recordEvents} 筆）`);
+  L.push(`- 日誌筆數：${result.totals.logEntries}（人工資料異動 ${result.totals.recordEvents} 筆；另有 ${result.totals.automatedEvents} 筆 API／匯入／自動計算已排除）`);
   L.push(`- 判定門檻：至少 ${result.params.minEvents} 次編輯才下結論；單一人佔比 ≥ ${(result.params.dominantShare * 100).toFixed(0)}% 視為單一負責`);
   L.push('');
 
@@ -281,7 +345,8 @@ function buildMarkdown(result) {
   L.push('|---|---|---|---|---:|---:|---|');
   for (const f of result.forms) {
     const flag = f.handover ? ' ⚠️交接' : '';
-    L.push(`| ${f.form} | ${VERDICT_LABEL[f.recent.verdict]}${flag} | ${f.recent.owners.join('、') || '—'} | ${f.overall.owners.join('、') || '—'} | ${f.events} | ${f.records} | ${fmtRanked(f.recent.ranked)} |`);
+    const d = display(f);
+    L.push(`| ${f.form} | ${d.label}${flag} | ${d.owners.join('、') || '—'} | ${f.overall.owners.join('、') || '—'} | ${f.events} | ${f.records} | ${fmtRanked(f.recent.ranked)} |`);
   }
   L.push('');
 
@@ -303,17 +368,27 @@ function buildMarkdown(result) {
     L.push('| 欄位 | 判定 | 近期負責人 | 編輯次數 | 近期分佈 |');
     L.push('|---|---|---|---:|---|');
     for (const f of group.fields) {
-      L.push(`| \`${f.field}\` | ${VERDICT_LABEL[f.recent.verdict]} | ${f.recent.owners.join('、') || '—'} | ${f.events} | ${fmtRanked(f.recent.ranked, 3)} |`);
+      const d = display(f);
+      L.push(`| \`${f.field}\` | ${d.label} | ${d.owners.join('、') || '—'} | ${f.events} | ${fmtRanked(f.recent.ranked, 3)} |`);
     }
+    L.push('');
+  }
+
+  if (result.silentForms.length) {
+    L.push('## 設定裡有、但日誌查無人工登錄的表單');
+    L.push('');
+    L.push(`近 ${result.params.months} 個月內沒有任何人工異動，無法從行為推負責人，需人工確認是否仍在收案：`);
+    L.push('');
+    for (const f of result.silentForms) L.push(`- ${f}`);
     L.push('');
   }
 
   L.push('## 人員總覽');
   L.push('');
-  L.push('| 人員 | 編輯次數 | 觸及病歷數 | 主要表單 | 最後登錄 |');
-  L.push('|---|---:|---:|---|---|');
+  L.push('| 人員 | 帳號 | 編輯次數 | 觸及病歷數 | 主要表單 | 最後登錄 |');
+  L.push('|---|---|---:|---:|---|---|');
   for (const p of result.people) {
-    L.push(`| ${p.name} | ${p.events} | ${p.records} | ${p.topForms.map(f => `${f.form}(${f.events})`).join('、')} | ${p.last} |`);
+    L.push(`| ${p.name} | ${p.accounts.join('、')} | ${p.events} | ${p.records} | ${p.topForms.map(f => `${f.form}(${f.events})`).join('、')} | ${p.last} |`);
   }
   L.push('');
   return L.join('\n');
@@ -324,7 +399,17 @@ function buildMarkdown(result) {
 async function main() {
   process.stderr.write('取得 REDCap metadata 與使用者清單…\n');
   const [fieldToForm, userNames] = await Promise.all([fetchFieldToForm(), fetchUsers()]);
-  const nameOf = username => userNames.get(username) || username;
+
+  // 帳號 → 身分（有對到使用者清單就用姓名，否則沿用帳號；退出專案的舊成員不在清單裡）
+  const aliases = new Map(); // 身分 → Set(帳號)
+  const identityOf = rawUser => {
+    const id = userNames.get(rawUser) || rawUser;
+    if (!aliases.has(id)) aliases.set(id, new Set());
+    aliases.get(id).add(rawUser);
+    return id;
+  };
+  // 收斂後 key 已經是姓名本身
+  const nameOf = identity => identity;
 
   process.stderr.write(`抓取近 ${MONTHS} 個月的稽核日誌…\n`);
   const rawLogs = await fetchAllLogs(MONTHS);
@@ -335,16 +420,22 @@ async function main() {
 
   const formBuckets = new Map();
   const fieldBuckets = new Map();  // `${form}::${field}`
-  const peopleBuckets = new Map(); // username → { events, records:Set, forms:Map, last }
+  const peopleBuckets = new Map(); // 身分 → { events, records:Set, forms:Map, last }
 
   let recordEvents = 0;
+  let automatedEvents = 0;
   const unmappedFields = new Map();
 
   for (const entry of rawLogs) {
     const action = entry.action || '';
     if (!RECORD_ACTION.test(action)) continue;
-    const username = entry.username;
-    if (!username || username === '[survey respondent]') continue;
+    if (AUTOMATED_ACTION.test(action)) { automatedEvents++; continue; }
+    const rawUser = entry.username;
+    if (!rawUser || rawUser === '[survey respondent]') continue;
+    if (SYSTEM_USER.test(rawUser)) { automatedEvents++; continue; }
+    // 同一個人可能有兩個帳號（例：熊墨樺 = g07470 + mohua0820），統一收斂到姓名，
+    // 否則同一人的編輯量會被拆成兩份、誰都達不到單一負責門檻
+    const username = identityOf(rawUser);
 
     const ts = entry.timestamp || '';
     const isRecent = ts >= recentCutoffStr;
@@ -366,6 +457,7 @@ async function main() {
         unmappedFields.set(field, (unmappedFields.get(field) || 0) + 1);
         continue;
       }
+      form = virtualForm(form, field);
       formsTouched.add(form);
 
       if (field.endsWith('_complete')) continue; // 完成狀態不算欄位層級的登錄行為
@@ -412,9 +504,10 @@ async function main() {
       (forms.find(f => f.form === b.form)?.events || 0) - (forms.find(f => f.form === a.form)?.events || 0));
 
   const people = Array.from(peopleBuckets.entries())
-    .map(([username, p]) => ({
-      username,
-      name: nameOf(username),
+    .map(([identity, p]) => ({
+      // 收斂後的身分，可能對應多個 REDCap 帳號
+      name: identity,
+      accounts: Array.from(aliases.get(identity) || [identity]),
       events: p.events,
       records: p.records.size,
       last: p.last,
@@ -428,8 +521,10 @@ async function main() {
   const result = {
     generatedAt: new Date().toISOString(),
     params: { months: MONTHS, recentMonths: RECENT_MONTHS, minEvents: MIN_EVENTS, dominantShare: DOMINANT_SHARE },
-    totals: { logEntries: rawLogs.length, recordEvents },
+    totals: { logEntries: rawLogs.length, recordEvents, automatedEvents },
     forms,
+    // /assign 上有這張表、但日誌完全沒有人工異動 —— 這類最可能就是「未指派」的來源
+    silentForms: CONFIGURED_FORMS.filter(name => !formBuckets.has(name)),
     fieldsByForm,
     people,
     unmappedFields: Array.from(unmappedFields.entries())

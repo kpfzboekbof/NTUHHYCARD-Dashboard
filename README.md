@@ -36,6 +36,12 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 | `GMAIL_USER`、`GMAIL_APP_PASSWORD` | 共識會議提醒信 |
 | `APP_BASE_URL` | 信件內連結的站台位址（未設時退回 Vercel 提供的 host） |
 
+## 尚未開始鍵入的表單
+
+`ntuh_nhi_ed_vital` 與 `ntuh_exam_ct` 在 REDCap 有 instrument，但實際上還沒有人在鍵入——ED Vital 全部 7,053 位未排除病人裡只有 2 位有任何一列資料，CT 則是 7,169 筆記錄裡連一個欄位都沒填過（2026-08-31 實測）。照常追蹤的話這兩張表會永遠停在 0%，把負責人畫成永遠落後，就是當初移除 Holter/Treadmill 幽靈表單的同一個問題。
+
+因此它們在 `config/forms.ts` 標了 `pendingEntry`，並成為 `hiddenForms` 的**預設值**——只有在管理者從未存過設定時才套用。開始鍵入的那天，到 `/assign` 把勾取消再存檔即可讓它重新出現，不需要改程式或重新部署。表單定義本身一直都在，drift 報告也照常比對。
+
 ## 登入
 
 兩條路徑並存，正在從左邊走到右邊：

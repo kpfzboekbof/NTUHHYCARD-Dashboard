@@ -1,5 +1,6 @@
 import type { OwnerAssignments } from '@/types';
 import { createVersionedStore } from '@/lib/store/versioned-store';
+import { FORMS } from '@/config/forms';
 
 export interface TargetIds {
   basic: number | null;
@@ -17,15 +18,28 @@ interface LegacyStoreData extends Partial<StoreData> {
   targetId?: number | null;
 }
 
-function normalize(raw: unknown): StoreData {
-  const empty: StoreData = { assignments: {}, hiddenForms: [], targetIds: { basic: null, exam: null } };
+/**
+ * Forms hidden until somebody starts entering them.
+ *
+ * Only a default, and only where nothing has been stored: the moment a manager
+ * saves in /assign their list is what counts, including an empty one. That is
+ * how a form comes back — untick it and save — without a deploy.
+ */
+export const DEFAULT_HIDDEN_FORMS: string[] = FORMS.filter(f => f.pendingEntry).map(f => f.name);
+
+export function normalize(raw: unknown): StoreData {
+  const empty: StoreData = {
+    assignments: {},
+    hiddenForms: [...DEFAULT_HIDDEN_FORMS],
+    targetIds: { basic: null, exam: null },
+  };
   if (!raw || typeof raw !== 'object') return empty;
 
   const stored = raw as LegacyStoreData;
   const legacyTarget = stored.targetId ?? null;
   return {
     assignments: stored.assignments ?? {},
-    hiddenForms: stored.hiddenForms ?? [],
+    hiddenForms: stored.hiddenForms ?? [...DEFAULT_HIDDEN_FORMS],
     targetIds: stored.targetIds ?? { basic: legacyTarget, exam: legacyTarget },
   };
 }

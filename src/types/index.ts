@@ -79,6 +79,15 @@ export interface FormConfig {
   name: string;
   label: string;
   target: number;
+  /**
+   * REDCap has the instrument, but nobody is entering it yet.
+   *
+   * Such a form is hidden from progress views by default, because showing it
+   * would park whoever owns it at 0% indefinitely — the same failure that made
+   * the Holter/treadmill ghost form worth removing. The definition stays, so
+   * the day entry begins a manager unticks it in /assign and it appears.
+   */
+  pendingEntry?: boolean;
 }
 
 export interface User {

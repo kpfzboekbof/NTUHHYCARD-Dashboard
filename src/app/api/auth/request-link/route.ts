@@ -4,7 +4,7 @@ import { findByEmail } from '@/lib/people/repo';
 import {
   createLoginToken, hasRecentLoginToken, pruneLoginTokens, LOGIN_TOKEN_TTL_SECONDS,
 } from '@/lib/auth/login-token';
-import { createTransporter, configuredBaseUrl } from '@/lib/mailer';
+import { createTransporter, configuredBaseUrl, escapeHtml } from '@/lib/mailer';
 import { recordAudit } from '@/lib/db/audit';
 import { safeInternalPath } from '@/lib/safe-path';
 
@@ -28,16 +28,6 @@ export const runtime = 'nodejs';
  */
 function noContent() {
   return new NextResponse(null, { status: 204 });
-}
-
-/** Email bodies carry a name from the registry; a name is not markup. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function loginEmail(link: string, displayName: string) {

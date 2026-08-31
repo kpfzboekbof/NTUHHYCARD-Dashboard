@@ -33,8 +33,10 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob，screening 每日掃描檔 |
 | `SCREENING_API_TOKEN` | 院內 scraper 上傳用的 Bearer token |
 | `REPORT_API_TOKEN` | 外部 PA 週報 routine 拉取 `/api/report/weekly` |
-| `GMAIL_USER`、`GMAIL_APP_PASSWORD` | 共識會議提醒信 |
-| `APP_BASE_URL` | 信件內連結的站台位址（未設時退回 Vercel 提供的 host） |
+| `GMAIL_USER`、`GMAIL_APP_PASSWORD` | 共識會議提醒信、催辦信、看門狗警報 |
+| `APP_BASE_URL` | 信件內連結的站台位址（登入連結必須有此設定或 Vercel 自動變數，不接受請求標頭） |
+| `CRON_SECRET` | Vercel Cron 呼叫 `/api/cron/*` 的 Bearer token（Vercel 會自動帶上）；未設定時排程端點只接受 manager session |
+| `SNAPSHOT_STALE_HOURS` | 快照多久沒更新算停擺（看門狗用，預設 30） |
 
 ## 尚未開始鍵入的表單
 
@@ -63,6 +65,17 @@ magic link 的連結 15 分鐘有效且只能用一次——`login_token` 表記
 `/admin/people` 的主要用途其實不是登入，而是**對照表**：REDCap 帳號 ↔ etiology labeler 代碼 ↔ email ↔ 顯示名稱。這是讓 `/owners`、`/productivity` 之後能停止用顯示名稱字串比對人的前提（設計書 Phase 5）。
 
 伺服器端的權限檢查只有一個進入點：`requireRole()`（`src/lib/auth/identity.ts`）。角色模型有五級但實務上只用 `manager`。proxy 只做簽章層級的樂觀檢查，不查資料庫——Next 16 文件明確要求 proxy 不當成完整授權層。
+
+## 排程（vercel.json）
+
+兩條每日 cron（Hobby 方案的上限內）：
+
+| 路徑 | 台北時間 | 做什麼 |
+|---|---|---|
+| `/api/cron/snapshot` | 05:30 | 快照 → 推導 → 與基準線 diff → 寫 `work_event` → 更新基準線。漏跑只會延遲「新交接」資訊，不會弄丟工作（佇列永遠從最新快照即時推導） |
+| `/api/cron/watchdog` | 15:30 | 只管「系統自己壞了」：scraper 當日缺檔、快照停擺——這兩件事不會出現在任何佇列裡。每事件每日最多一封信，寄給負責人 |
+
+手動觸發：manager 登入後直接 GET 這兩個路徑即可（不需要 CRON_SECRET）。
 
 ## 部署
 

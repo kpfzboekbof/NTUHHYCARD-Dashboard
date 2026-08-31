@@ -791,7 +791,7 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 
 **永不中斷**：REDCap 資料輸入、深連結、scraper 上傳契約、PA 週報契約、已寄出信箱裡的 RSVP 連結、側欄分類、以及每個讀取視圖在其自身遷移 phase 內（每頁在單一 phase 內原子切換資料來源）。**計畫可在任何 phase 後無限期暫停，不留半吊子狀態**——P1 單獨解決記名問題、P2 單獨解決問題3、P3+P4 單獨解決問題2、P5 單獨解決問題1。
 
-**進度（2026-08-31）**：Phase 0 ✅、Phase 1 ✅（PR #10、#11 已合併上線）。Phase 2 與 3 的引擎已完成且有測試，但**尚未接上既有頁面**——catalog 編輯器未做、每小時快照 cron 未做、`/heatmap` 與 `/incomplete` 仍讀舊的 `/api/completion`、`/patients` 兩頁未做。因此問題1 與問題2 的機制目前都還沒對負責人可見。
+**進度（2026-08-31）**：Phase 0 ✅、Phase 1 ✅（PR #10、#11）。**Phase 4 ✅**：每日快照 cron + `work_event` + `outbound_mail` + `/api/nudge` + watchdog；`/incomplete` 已切到狀態引擎並吸收三切面與催辦鈕（Phase 3 對這一頁的 cutover 一併完成）。**注意快照頻率是每日而非設計原文的每小時**——Vercel Hobby 上限；`/api/cron/snapshot` 可手動或由外部排程器加打，事件語意不受頻率影響。Phase 2/3 尚餘：catalog 編輯器、`/heatmap` 的狀態渲染 cutover、`/patients` 兩頁、`/admin/parity`。REDCap 匯出已改為**依 repeating instrument 分割的循序匯出**（整包 59 欄匯出實測 ~575MB，REDCap 以 500 或空 200 回應；分割後 ~64 秒完成）——實作任何新匯出一律用 `fetchRecordsByFieldsSplit`。
 
 ---
 

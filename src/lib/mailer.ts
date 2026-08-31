@@ -9,6 +9,16 @@ import * as nodemailer from 'nodemailer';
  * reminder: the reminder can be re-sent, the login link is the only way in.
  */
 
+/** Email bodies routinely carry names and notes from the registry; text is not markup. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** Null when Gmail credentials are absent — callers decide whether that is fatal. */
 export function createTransporter() {
   const user = process.env.GMAIL_USER;

@@ -51,10 +51,11 @@ export const config = {
   //  - /api/screening/upload       (scraper uploads via Bearer token, not cookie)
   //  - /api/rsvp                   (one-click RSVP from email; uses signed token)
   //  - /api/report/weekly          (PA 週報 routine reads via Bearer token, not cookie)
+  //  - /api/cron/*                 (排程器帶 CRON_SECRET，不帶 cookie；route 自行驗證)
   //  - /_next/static, /_next/image (build assets)
   //  - /favicon.ico                (icon)
   //  - any file with an extension  (images, fonts, etc. in /public)
   matcher: [
-    '/((?!login|api/user-auth|api/auth/request-link|api/auth/callback|api/screening/upload|api/rsvp|api/report/weekly|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
+    '/((?!login|api/user-auth|api/auth/request-link|api/auth/callback|api/screening/upload|api/rsvp|api/report/weekly|api/cron|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
   ],
 };

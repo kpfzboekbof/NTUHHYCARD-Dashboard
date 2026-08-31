@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -8,26 +7,9 @@ import { buildReminderEmail } from '@/lib/email-template';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
 import { createTransporter, resolveBaseUrl } from '@/lib/mailer';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAudit } from '@/lib/db/audit';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
-
-function generateAdminToken(): string {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-async function verifyAdmin(): Promise<boolean> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  const expected = generateAdminToken();
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  return !!(adminPw && token && token === expected);
-}
 
 /** Filter incomplete records by ID range */
 function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo: number | null): EtiologyRecord[] {
@@ -85,21 +67,29 @@ export async function GET() {
 
 /** POST — send reminder emails or update meeting settings */
 export async function POST(request: NextRequest) {
-  try {
-    if (!(await verifyAdmin())) {
-      return NextResponse.json({ error: '未授權，請先以管理員身份登入' }, { status: 401 });
-    }
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
+  try {
     const body = await request.json();
 
     // Update meeting settings (date + ID range)
     if (body.action === 'updateSettings') {
+      const before = await getMeetingSettings();
       const settings = await updateMeetingSettings(current => ({
         ...current,
         meetingDate: 'meetingDate' in body ? (body.meetingDate || null) : current.meetingDate,
         idFrom: 'idFrom' in body ? (body.idFrom ?? null) : current.idFrom,
         idTo: 'idTo' in body ? (body.idTo ?? null) : current.idTo,
       }));
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'meeting_settings.update',
+        entityType: 'meeting',
+        entityId: settings.meetingDate ?? 'unset',
+        before,
+        after: settings,
+      });
       return NextResponse.json({ ok: true, ...settings });
     }
 
@@ -176,6 +166,18 @@ export async function POST(request: NextRequest) {
       // an RSVP that arrived meanwhile would otherwise be erased.
       const sentAt = new Date().toISOString();
       await updateMeetingSettings(current => ({ ...current, reminderSentAt: sentAt }));
+
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'reminder.send',
+        entityType: 'meeting',
+        entityId: settings.meetingDate,
+        after: {
+          sentAt,
+          sent: results.filter(r => r.success).map(r => r.email),
+          failed: results.filter(r => !r.success).map(r => r.email),
+        },
+      });
 
       return NextResponse.json({ ok: true, results, sentAt });
     }

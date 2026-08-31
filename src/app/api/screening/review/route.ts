@@ -1,38 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { get, put } from '@vercel/blob';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAudit } from '@/lib/db/audit';
+import type { ScreeningReview } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const BLOB_PREFIX = 'screening/';
 
-/** Verify admin auth */
-async function isAuthenticated(): Promise<boolean> {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  if (!adminPw) return false;
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  const expected = Math.abs(hash).toString(36);
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  return token === expected;
-}
-
 /**
  * POST /api/screening/review
  *
  * 審核 Possible_OHCA 病人。
  * Body: { id: string, decision: "confirmed" | "excluded", month: "2025-06" }
+ *
+ * The stored decision now carries who made it. It used to be
+ * `{decision, reviewedAt}` — a judgement about whether a patient enters the
+ * study, with nobody's name on it.
  */
 export async function POST(request: NextRequest) {
-  if (!await isAuthenticated()) {
-    return NextResponse.json({ error: '未授權' }, { status: 401 });
-  }
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
   const body = await request.json();
   const { id, decision, month } = body;
@@ -48,7 +37,7 @@ export async function POST(request: NextRequest) {
   const reviewPath = `${BLOB_PREFIX}${month}/_reviews.json`;
 
   // 讀取現有審核紀錄（private blob）
-  let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
+  let reviews: Record<string, ScreeningReview> = {};
   try {
     const result = await get(reviewPath, { access: 'private' });
     if (result && result.statusCode === 200 && result.stream) {
@@ -59,10 +48,18 @@ export async function POST(request: NextRequest) {
     // 不存在就用空物件
   }
 
+  const before = reviews[id];
+
   // 更新
   reviews[id] = {
     decision,
     reviewedAt: new Date().toISOString(),
+    decidedBy: {
+      personId: auth.identity.personId,
+      label: 'personId' in auth.identity.actor
+        ? auth.identity.actor.personId
+        : auth.identity.actor.tokenName,
+    },
   };
 
   try {
@@ -81,6 +78,15 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  await recordAudit({
+    actor: auth.identity.actor,
+    action: 'screening.review',
+    entityType: 'screening_case',
+    entityId: `${month}/${id}`,
+    before,
+    after: reviews[id],
+  });
 
   return NextResponse.json({ ok: true, id, decision });
 }

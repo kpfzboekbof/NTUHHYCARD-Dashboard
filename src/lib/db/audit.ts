@@ -1,4 +1,4 @@
-import { getSql } from './client';
+import { getSql, hasDatabase } from './client';
 
 /**
  * The audit trail.
@@ -50,6 +50,24 @@ export function auditQuery(sql: SqlTag, entry: AuditEntry) {
 /** Write one audit row on its own, for changes that are not database writes. */
 export async function writeAudit(entry: AuditEntry): Promise<void> {
   await auditQuery(getSql(), entry);
+}
+
+/**
+ * Audit a change that landed somewhere this database cannot reach — REDCap,
+ * Redis, Blob storage. There is no shared transaction to join, so the row is
+ * written after the fact, and a failure here is logged rather than raised: the
+ * write already happened, and reporting it as failed would be the bigger lie.
+ *
+ * A no-op when no management database is configured, so every route that calls
+ * it keeps working exactly as it did before Postgres existed.
+ */
+export async function recordAudit(entry: AuditEntry): Promise<void> {
+  if (!hasDatabase()) return;
+  try {
+    await writeAudit(entry);
+  } catch (error) {
+    console.error(`audit write failed for ${entry.action} ${entry.entityType}:${entry.entityId}`, error);
+  }
 }
 
 export interface AuditRow {

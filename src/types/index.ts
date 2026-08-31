@@ -180,6 +180,26 @@ export interface ScreeningPatient {
   ohcaClass: OhcaClass;
   reviewed: ReviewDecision;
   reviewedAt?: string;
+  /** Who confirmed or excluded this patient; absent on decisions made before names existed. */
+  decidedBy?: ScreeningDecider;
+}
+
+/**
+ * The person behind a screening decision.
+ *
+ * `personId` is null when the decision came in on the shared admin password —
+ * honest about what is known, rather than attributing it to nobody at all.
+ */
+export interface ScreeningDecider {
+  personId: string | null;
+  label: string;
+}
+
+/** One stored screening decision, as written to the month's `_reviews.json`. */
+export interface ScreeningReview {
+  decision: string;
+  reviewedAt: string;
+  decidedBy?: ScreeningDecider;
 }
 
 export interface ScanInfo {

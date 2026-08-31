@@ -119,6 +119,8 @@ export interface EtiologyResponse {
   records: EtiologyRecord[];
   stats: EtiologyStats;
   labelers: Labeler[];
+  /** Data-entry deep-link base, built from REDCap's reported version. */
+  redcapBaseUrl: string;
   fetchedAt: string;
 }
 

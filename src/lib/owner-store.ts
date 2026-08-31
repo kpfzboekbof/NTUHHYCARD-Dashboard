@@ -1,4 +1,5 @@
 import type { OwnerAssignments } from '@/types';
+import { createVersionedStore } from '@/lib/store/versioned-store';
 
 export interface TargetIds {
   basic: number | null;
@@ -6,116 +7,55 @@ export interface TargetIds {
 }
 
 interface StoreData {
-  assignments?: OwnerAssignments;
-  hiddenForms?: string[];
-  targetId?: number | null;       // legacy, migrated to targetIds
-  targetIds?: TargetIds;
+  assignments: OwnerAssignments;
+  hiddenForms: string[];
+  targetIds: TargetIds;
 }
 
-const KV_KEY = 'owner-store';
-
-/* ── Redis (Vercel production) ─────────────────────────── */
-
-async function getRedisClient() {
-  const Redis = (await import('ioredis')).default;
-  const client = new Redis(process.env.REDIS_URL || '', {
-    maxRetriesPerRequest: 1,
-    lazyConnect: true,
-  });
-  await client.connect();
-  return client;
+/** Shape written before targets were split into basic/exam. */
+interface LegacyStoreData extends Partial<StoreData> {
+  targetId?: number | null;
 }
 
-async function readRedis(): Promise<StoreData> {
-  let client;
-  try {
-    client = await getRedisClient();
-    const raw = await client.get(KV_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  } finally {
-    client?.disconnect();
-  }
+function normalize(raw: unknown): StoreData {
+  const empty: StoreData = { assignments: {}, hiddenForms: [], targetIds: { basic: null, exam: null } };
+  if (!raw || typeof raw !== 'object') return empty;
+
+  const stored = raw as LegacyStoreData;
+  const legacyTarget = stored.targetId ?? null;
+  return {
+    assignments: stored.assignments ?? {},
+    hiddenForms: stored.hiddenForms ?? [],
+    targetIds: stored.targetIds ?? { basic: legacyTarget, exam: legacyTarget },
+  };
 }
 
-async function writeRedis(data: StoreData): Promise<void> {
-  let client;
-  try {
-    client = await getRedisClient();
-    await client.set(KV_KEY, JSON.stringify(data));
-  } finally {
-    client?.disconnect();
-  }
-}
-
-/* ── Local file (development) ───────────────────────────── */
-
-async function readLocal(): Promise<StoreData> {
-  try {
-    const { readFileSync } = await import('fs');
-    const { join } = await import('path');
-    const raw = readFileSync(join(process.cwd(), 'data', 'owner-assignments.json'), 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-async function writeLocal(data: StoreData): Promise<void> {
-  const { writeFileSync, mkdirSync } = await import('fs');
-  const { join } = await import('path');
-  const dir = join(process.cwd(), 'data');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'owner-assignments.json'), JSON.stringify(data, null, 2), 'utf-8');
-}
-
-/* ── Auto-detect environment ────────────────────────────── */
-
-const isVercel = !!process.env.VERCEL;
-
-async function readStore(): Promise<StoreData> {
-  return isVercel ? readRedis() : readLocal();
-}
-
-async function writeStore(data: StoreData): Promise<void> {
-  return isVercel ? writeRedis(data) : writeLocal(data);
-}
-
-/* ── Public API (all async) ─────────────────────────────── */
+const store = createVersionedStore<StoreData>({
+  redisKey: 'owner-store',
+  localFile: 'owner-assignments.json',
+  normalize,
+});
 
 export async function getAssignments(): Promise<OwnerAssignments> {
-  const data = await readStore();
-  return data.assignments ?? {};
+  return (await store.read()).data.assignments;
 }
 
 export async function setAssignments(assignments: OwnerAssignments): Promise<void> {
-  const data = await readStore();
-  data.assignments = assignments;
-  await writeStore(data);
+  await store.update(current => ({ ...current, assignments }));
 }
 
 export async function getHiddenForms(): Promise<string[]> {
-  const data = await readStore();
-  return data.hiddenForms ?? [];
+  return (await store.read()).data.hiddenForms;
 }
 
 export async function setHiddenForms(hiddenForms: string[]): Promise<void> {
-  const data = await readStore();
-  data.hiddenForms = hiddenForms;
-  await writeStore(data);
+  await store.update(current => ({ ...current, hiddenForms }));
 }
 
 export async function getTargetIds(): Promise<TargetIds> {
-  const data = await readStore();
-  if (data.targetIds) return data.targetIds;
-  const legacy = data.targetId ?? null;
-  return { basic: legacy, exam: legacy };
+  return (await store.read()).data.targetIds;
 }
 
 export async function setTargetIds(targetIds: TargetIds): Promise<void> {
-  const data = await readStore();
-  data.targetIds = targetIds;
-  delete data.targetId;
-  await writeStore(data);
+  await store.update(current => ({ ...current, targetIds }));
 }

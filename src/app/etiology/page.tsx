@@ -284,9 +284,17 @@ export default function EtiologyPage() {
         alert(d.error || '上傳失敗');
         return;
       }
-      applyFinalLocally(updates);
+      // Only clear rows REDCap confirmed; unconfirmed ones stay in the list.
+      const confirmed: string[] = Array.isArray(d.imported) ? d.imported : updates.map(u => u.studyId);
+      const confirmedSet = new Set(confirmed);
+      applyFinalLocally(updates.filter(u => confirmedSet.has(u.studyId)));
       setShowBatchPreview(false);
-      alert(`已上傳 ${d.count ?? updates.length} 筆共識結果到 REDCap`);
+      const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
+      alert(
+        missing.length > 0
+          ? `已上傳 ${confirmed.length} 筆共識結果到 REDCap。\n未確認 ${missing.length} 筆，仍留在清單中：${missing.join(', ')}`
+          : `已上傳 ${confirmed.length} 筆共識結果到 REDCap`
+      );
     } catch {
       alert('網路錯誤，請稍後再試');
     } finally {
@@ -727,7 +735,7 @@ export default function EtiologyPage() {
                               className={`px-3 py-1.5 font-mono sticky left-0 z-10 cursor-pointer hover:underline text-blue-600 ${stickyBg} ${isConsensus ? 'text-lg font-semibold' : 'text-xs'}`}
                               onClick={() => {
                                 setLastVisited(r.studyId);
-                                window.open(`https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207&id=${r.studyId}&page=ntuh_nhi_etiology`, '_blank');
+                                if (data?.redcapBaseUrl) window.open(`${data.redcapBaseUrl}&id=${encodeURIComponent(r.studyId)}&page=ntuh_nhi_etiology`, '_blank');
                               }}
                             >{r.studyId}</td>
 

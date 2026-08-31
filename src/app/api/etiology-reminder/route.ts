@@ -4,8 +4,9 @@ import * as nodemailer from 'nodemailer';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
-import { getMeetingSettings, setMeetingSettings } from '@/lib/meeting-store';
+import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
@@ -121,11 +122,12 @@ export async function POST(request: NextRequest) {
 
     // Update meeting settings (date + ID range)
     if (body.action === 'updateSettings') {
-      const settings = await getMeetingSettings();
-      if ('meetingDate' in body) settings.meetingDate = body.meetingDate || null;
-      if ('idFrom' in body) settings.idFrom = body.idFrom ?? null;
-      if ('idTo' in body) settings.idTo = body.idTo ?? null;
-      await setMeetingSettings(settings);
+      const settings = await updateMeetingSettings(current => ({
+        ...current,
+        meetingDate: 'meetingDate' in body ? (body.meetingDate || null) : current.meetingDate,
+        idFrom: 'idFrom' in body ? (body.idFrom ?? null) : current.idFrom,
+        idTo: 'idTo' in body ? (body.idTo ?? null) : current.idTo,
+      }));
       return NextResponse.json({ ok: true, ...settings });
     }
 
@@ -152,6 +154,7 @@ export async function POST(request: NextRequest) {
       const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
 
       const baseUrl = await resolveBaseUrl();
+      const redcapBaseUrl = await getDataEntryBase();
 
       // Optional: only send to specific labeler codes
       const targetCodes: number[] | undefined = body.labelerCodes;
@@ -179,6 +182,7 @@ export async function POST(request: NextRequest) {
             labelerCode: labeler.code,
             signature: signRsvp(labeler.code, settings.meetingDate),
           },
+          redcapBaseUrl,
         );
 
         try {
@@ -195,11 +199,13 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Record when reminder was sent
-      settings.reminderSentAt = new Date().toISOString();
-      await setMeetingSettings(settings);
+      // Record when reminder was sent. Sending takes seconds, so write just
+      // this field back rather than the settings we read before the send loop —
+      // an RSVP that arrived meanwhile would otherwise be erased.
+      const sentAt = new Date().toISOString();
+      await updateMeetingSettings(current => ({ ...current, reminderSentAt: sentAt }));
 
-      return NextResponse.json({ ok: true, results, sentAt: settings.reminderSentAt });
+      return NextResponse.json({ ok: true, results, sentAt });
     }
 
     return NextResponse.json({ error: '未知的 action' }, { status: 400 });

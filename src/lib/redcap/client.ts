@@ -24,22 +24,50 @@ async function redcapPost(body: Record<string, string>): Promise<Response> {
   return res;
 }
 
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const values = line.split(',').map(v => v.replace(/^"|"$/g, ''));
-    const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j] ?? '';
+export type RedcapRow = Record<string, string>;
+
+/** Every REDCap value is a string to the rest of the app; nulls become ''. */
+function normalizeRow(raw: unknown): RedcapRow {
+  const row: RedcapRow = {};
+  if (raw && typeof raw === 'object') {
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      row[key] = value === null || value === undefined ? '' : String(value);
     }
-    rows.push(row);
   }
-  return rows;
+  return row;
+}
+
+/** Read a REDCap response body, surfacing REDCap's own `{"error": ...}` shape. */
+async function redcapJson(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text.trim()) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`REDCap returned malformed JSON: ${text.slice(0, 200)}`);
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'error' in parsed) {
+    const detail = String((parsed as { error: unknown }).error);
+    throw new Error(`REDCap API error: ${detail.slice(0, 300)}`);
+  }
+  return parsed;
+}
+
+/**
+ * Export records as JSON rather than CSV: REDCap's CSV export has to be split
+ * on bare commas, so any field value containing one shifts every later column.
+ */
+async function exportRecords(fields: string[]): Promise<RedcapRow[]> {
+  const res = await redcapPost({
+    content: 'record',
+    format: 'json',
+    type: 'flat',
+    fields: fields.join(','),
+  });
+  const parsed = await redcapJson(res);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(normalizeRow);
 }
 
 /** Aggregate repeat-instrument rows: keep max completion status per study_id per form */
@@ -88,15 +116,15 @@ export async function fetchCompletionStatus(): Promise<RawCompletionRecord[]> {
   // Include ntuh_nhi_core_complete for Core 醫師 virtual form
   const fields = ['study_id', 'hospital', 'exclusion', 'sur_icu', 'ntuh_nhi_core_complete', 'ntuh_nhi_outcome_complete', ...REDCAP_FORM_NAMES.map(f => `${f}_complete`)];
 
-  const res = await redcapPost({
-    content: 'record',
-    format: 'csv',
-    fields: fields.join(','),
-  });
+  return aggregateRepeatRows(await exportRecords(fields));
+}
 
-  const text = await res.text();
-  const rawRows = parseCsv(text);
-  return aggregateRepeatRows(rawRows);
+/**
+ * Export an arbitrary field set — used by the state engine, whose fields are
+ * computed from the work-unit catalog rather than fixed in code.
+ */
+export async function fetchRecordsByFields(fields: string[]): Promise<RedcapRow[]> {
+  return exportRecords(fields);
 }
 
 export async function fetchUsers(): Promise<RawUser[]> {
@@ -115,13 +143,7 @@ export async function fetchCoreAssistantStatus(): Promise<Map<string, boolean>> 
     ...CORE_ASSISTANT_REQUIRED_FIELDS,
     ...CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER,
   ]);
-  const res = await redcapPost({
-    content: 'record',
-    format: 'csv',
-    fields: Array.from(allFields).join(','),
-  });
-  const text = await res.text();
-  const rows = parseCsv(text);
+  const rows = await exportRecords(Array.from(allFields));
 
   // Only process main rows (no repeat instrument)
   const result = new Map<string, boolean>();
@@ -157,13 +179,7 @@ export async function fetchOutcomeStatus(): Promise<{
   etiologyFinalStatus: Map<string, boolean>;
 }> {
   const fields = ['study_id', 'etiology_final', ...OUTCOME_ASSISTANT_REQUIRED_FIELDS];
-  const res = await redcapPost({
-    content: 'record',
-    format: 'csv',
-    fields: fields.join(','),
-  });
-  const text = await res.text();
-  const rows = parseCsv(text);
+  const rows = await exportRecords(fields);
 
   const assistantStatus = new Map<string, boolean>();
   const etiologyFinalStatus = new Map<string, boolean>();
@@ -189,13 +205,7 @@ export async function fetchOutcomeStatus(): Promise<{
 
 /** Fetch study IDs where any reviewer marked cause_all_etiology_new = 1 (trauma) */
 export async function fetchTraumaEligibleIds(): Promise<Set<string>> {
-  const res = await redcapPost({
-    content: 'record',
-    format: 'csv',
-    fields: 'study_id,cause_all_etiology_new',
-  });
-  const text = await res.text();
-  const rows = parseCsv(text);
+  const rows = await exportRecords(['study_id', 'cause_all_etiology_new']);
   const ids = new Set<string>();
   for (const row of rows) {
     if (row.cause_all_etiology_new === '1' && row.study_id) {
@@ -205,61 +215,71 @@ export async function fetchTraumaEligibleIds(): Promise<Set<string>> {
   return ids;
 }
 
-export async function fetchEtiologyStatus(): Promise<Record<string, string>[]> {
+export async function fetchEtiologyStatus(): Promise<RedcapRow[]> {
+  return exportRecords([
+    'study_id', 'reg_no', 'exclusion', 'labeler', 'etiology_final',
+    'ntuh_nhi_etiology_complete',
+    'cause_all_etiology_new', 'cause_med_etiology_new',
+    'cause_tra_etiology_new', 'cause_asphy_etiology_new',
+  ]);
+}
+
+export interface ImportResult {
+  /** Study IDs we asked REDCap to write. */
+  requested: string[];
+  /** Study IDs REDCap confirmed it wrote. */
+  imported: string[];
+  /** Requested but unconfirmed — these were NOT written and must stay in the queue. */
+  missing: string[];
+}
+
+/**
+ * Import field values into REDCap and verify the write per record.
+ *
+ * `returnContent: 'ids'` makes REDCap answer with the record IDs it actually
+ * wrote, so a partial import is visible instead of hiding behind a total count.
+ */
+async function importRecords(
+  records: Array<{ study_id: string; [field: string]: string }>,
+): Promise<ImportResult> {
+  const requested = records.map(r => r.study_id);
+  if (records.length === 0) return { requested: [], imported: [], missing: [] };
+
   const res = await redcapPost({
     content: 'record',
-    format: 'csv',
-    fields: 'study_id,reg_no,exclusion,labeler,etiology_final,ntuh_nhi_etiology_complete,cause_all_etiology_new,cause_med_etiology_new,cause_tra_etiology_new,cause_asphy_etiology_new',
+    action: 'import',
+    format: 'json',
+    type: 'flat',
+    overwriteBehavior: 'overwrite',
+    returnContent: 'ids',
+    data: JSON.stringify(records),
   });
-  const text = await res.text();
-  return parseCsv(text);
+
+  const parsed = await redcapJson(res);
+  const imported = Array.isArray(parsed) ? parsed.map(id => String(id)) : [];
+  const confirmed = new Set(imported);
+  return { requested, imported, missing: requested.filter(id => !confirmed.has(id)) };
 }
 
 export async function importEtiologyFinal(studyId: string, code: number): Promise<void> {
-  const data = JSON.stringify([{ study_id: studyId, etiology_final: code.toString() }]);
-  const res = await redcapPost({
-    content: 'record',
-    action: 'import',
-    format: 'json',
-    type: 'flat',
-    overwriteBehavior: 'overwrite',
-    data,
-  });
-  const text = await res.text();
-  // REDCap may return "1", "count:1", or {"count":1} depending on version
-  const match = text.match(/(\d+)/);
-  const count = match ? parseInt(match[1]) : 0;
-  if (count < 1) {
-    throw new Error(`REDCap import returned unexpected response: ${text}`);
+  const { missing } = await importRecords([
+    { study_id: studyId, etiology_final: code.toString() },
+  ]);
+  if (missing.length > 0) {
+    throw new Error(`REDCap 未確認 study ${studyId} 的寫入，請重新整理後確認`);
   }
 }
 
-/** Batch import field values into REDCap. Returns the number of records updated. */
+/** Batch import field values into REDCap, reporting which records were written. */
 export async function batchImportField(
   records: Array<{ study_id: string; [field: string]: string }>,
-): Promise<number> {
-  if (records.length === 0) return 0;
-  const data = JSON.stringify(records);
-  const res = await redcapPost({
-    content: 'record',
-    action: 'import',
-    format: 'json',
-    type: 'flat',
-    overwriteBehavior: 'overwrite',
-    data,
-  });
-  const text = await res.text();
-  const match = text.match(/(\d+)/);
-  const count = match ? parseInt(match[1]) : 0;
-  if (count < 1) {
-    throw new Error(`REDCap batch import returned unexpected response: ${text}`);
-  }
-  return count;
+): Promise<ImportResult> {
+  return importRecords(records);
 }
 
 /** Fetch fields needed for QC record-level checks */
-export async function fetchQcRecords(): Promise<Record<string, string>[]> {
-  // Note: redcap_repeat_instrument is included automatically in CSV output
+export async function fetchQcRecords(): Promise<RedcapRow[]> {
+  // Note: redcap_repeat_instrument is returned automatically for repeating projects
   const fields = [
     'study_id', 'hospital', 'exclusion',
     // A1-A2: 重複欄位衝突 (DNR)
@@ -282,13 +302,7 @@ export async function fetchQcRecords(): Promise<Record<string, string>[]> {
     'emt_core', 'emtp_core', 'witnessed_core',
     'bystander_core', 'pad_core', 'manual_core', 'mcc_core', 'aed_core',
   ];
-  const res = await redcapPost({
-    content: 'record',
-    format: 'csv',
-    fields: fields.join(','),
-  });
-  const text = await res.text();
-  return parseCsv(text);
+  return exportRecords(fields);
 }
 
 export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[]> {
@@ -308,4 +322,24 @@ export async function fetchLogging(monthsBack: number = 3): Promise<RawLogEntry[
     return [];
   }
   return JSON.parse(text);
+}
+
+/** REDCap's own version string, e.g. "17.4.1". */
+export async function fetchRedcapVersion(): Promise<string> {
+  const res = await redcapPost({ content: 'version' });
+  return (await res.text()).trim();
+}
+
+/** Project metadata (the data dictionary). */
+export async function fetchMetadata(): Promise<RedcapRow[]> {
+  const res = await redcapPost({ content: 'metadata', format: 'json' });
+  const parsed = await redcapJson(res);
+  return Array.isArray(parsed) ? parsed.map(normalizeRow) : [];
+}
+
+/** Project info — used for the project id in deep links. */
+export async function fetchProjectInfo(): Promise<RedcapRow> {
+  const res = await redcapPost({ content: 'project', format: 'json' });
+  const parsed = await redcapJson(res);
+  return normalizeRow(Array.isArray(parsed) ? parsed[0] : parsed);
 }

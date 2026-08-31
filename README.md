@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OHCA Dashboard
 
-## Getting Started
+NTUH OHCA registry 的管理儀表板。REDCap（pid=8207）是唯一的資料來源，這個 app 只讀取並衍生管理視圖；每一列都深連結回 REDCap 的資料輸入頁——**Dashboard 是佇列，REDCap 是編輯器**。
 
-First, run the development server:
+正在依 [`docs/management-system-redesign.md`](docs/management-system-redesign.md) 分階段重建管理層（WorkUnit 設定化拆分、狀態機交接引擎、人員身分與進度模型）。
+
+## 開發
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
+npm run typecheck    # tsc --noEmit
+npm run test         # node --test（Node 22 原生剝離 TS 型別，無需額外套件）
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等）。**動任何程式碼前先讀 `node_modules/next/dist/docs/`**，見 [`AGENTS.md`](AGENTS.md)。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+本地開發時，app 狀態（負責人指派、labeler、會議設定）寫在 gitignore 的 `./data/*.json`；部署環境改用 Redis。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+管理資料庫（人員身分、稽核記錄）用 Postgres：`npm run migrate` 套用 `migrations/` 底下的 SQL。**這個專案的資料表必須獨立於其他應用程式**——migration runner 會先檢查目標資料庫裡有沒有不屬於本專案的資料表，有就拒絕執行。臨床資料一律留在 REDCap，這個資料庫只放 REDCap 表達不了的管理中繼資料。
 
-## Learn More
+## 環境變數
 
-To learn more about Next.js, take a look at the following resources:
+| 變數 | 用途 |
+|---|---|
+| `OHCA_DATABASE_URL` | 管理資料庫（人員、稽核）的 Neon 連線字串。未設定時退回 `DATABASE_URL`——專屬變數名是為了讓多專案共用的開發環境不會互撞 |
+| `SESSION_SECRET` | 簽發／驗證個人登入 session |
+| `REDCAP_URL`、`REDCAP_TOKEN` | REDCap API（預設 `https://redcap.ntuh.gov.tw/api/`） |
+| `USER_PASSWORD` | 全站登入密碼 |
+| `ADMIN_PASSWORD` | 管理者操作密碼 |
+| `REDIS_URL` | app 狀態儲存（Vercel 環境） |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob，screening 每日掃描檔 |
+| `SCREENING_API_TOKEN` | 院內 scraper 上傳用的 Bearer token |
+| `REPORT_API_TOKEN` | 外部 PA 週報 routine 拉取 `/api/report/weekly` |
+| `GMAIL_USER`、`GMAIL_APP_PASSWORD` | 共識會議提醒信 |
+| `APP_BASE_URL` | 信件內連結的站台位址（未設時退回 Vercel 提供的 host） |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 部署
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Vercel 是唯一維護中的部署目標。** 應用依賴 Vercel Blob（screening）與 Redis（app 狀態），重建計畫後續階段還會加上 Postgres 與排程。
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+repo 內的 `Dockerfile` 與 `docker-compose.yml` **未維護、目前不可用**：`docker-compose.yml` 缺少 `USER_PASSWORD`（沒有它 proxy 會把每個頁面導回 `/login`）、`REDIS_URL`（app 狀態無處存放，重建即遺失）與 `BLOB_READ_WRITE_TOKEN`（screening 功能無法運作），也沒有掛載 `/app/data` volume。設計書 §15 Phase 0 建議移除這兩個檔案；在做出決定前先保留但不要當成可用的部署路徑。

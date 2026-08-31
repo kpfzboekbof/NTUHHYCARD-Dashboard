@@ -43,7 +43,7 @@ export function transformCompletion(
 
     for (const form of FORMS) {
       // Lab ICU and Postarrest Care only apply to patients admitted to ICU (sur_icu=1)
-      const ICU_DEPENDENT_FORMS = ['ntuh_nhi_lab_icu', 'ntuh_nhi_postarrest_care'];
+      const ICU_DEPENDENT_FORMS = ['ntuh_nhi_lab_icu', 'ntuh_nhi_postarrest_vital', 'ntuh_nhi_postarrest_care'];
       if (ICU_DEPENDENT_FORMS.includes(form.name) && !surIcu) {
         continue; // skip — not applicable for this patient
       }

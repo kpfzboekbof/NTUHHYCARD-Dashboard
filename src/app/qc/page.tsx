@@ -8,11 +8,10 @@ import { ExternalLink, AlertTriangle, AlertCircle, Clock, TrendingDown, Activity
 import { QC_CHECK_META, BEHAVIOR_CHECK_META } from '@/config/qc-checks';
 import { HOSPITALS } from '@/config/hospitals';
 
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw';
-const REDCAP_PID = '8207';
-
-function redcapRecordUrl(studyId: string, page: string): string {
-  return `${REDCAP_BASE}/redcap_v16.1.9/DataEntry/index.php?pid=${REDCAP_PID}&id=${studyId}&page=${page}`;
+// The base comes from the API, which reads REDCap's version: the path contains
+// it, so pinning a version here breaks every link on the next upgrade.
+function redcapRecordUrl(base: string, studyId: string, page: string): string {
+  return `${base}&id=${encodeURIComponent(studyId)}&page=${encodeURIComponent(page)}`;
 }
 
 const ALL_CHECK_META = [...QC_CHECK_META, ...BEHAVIOR_CHECK_META];
@@ -35,7 +34,7 @@ export default function QcPage() {
   const [lastVisited, setLastVisited] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [fixing, setFixing] = useState(false);
-  const [fixResult, setFixResult] = useState<{ updated: number; studyIds: string[] } | null>(null);
+  const [fixResult, setFixResult] = useState<{ updated: number; studyIds: string[]; missing?: string[] } | null>(null);
 
   // Merge all flags into unified list
   const allFlags = useMemo(() => {
@@ -151,10 +150,18 @@ export default function QcPage() {
           </div>
         )}
         {fixResult && (
-          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-400">
-            已修正 <strong>{fixResult.updated}</strong> 筆記錄
-            {fixResult.studyIds.length > 0 && (
-              <span className="ml-1">(Study ID: {fixResult.studyIds.join(', ')})</span>
+          <div className="space-y-2">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-400">
+              已修正 <strong>{fixResult.updated}</strong> 筆記錄
+              {fixResult.studyIds.length > 0 && (
+                <span className="ml-1">(Study ID: {fixResult.studyIds.join(', ')})</span>
+              )}
+            </div>
+            {fixResult.missing && fixResult.missing.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">
+                REDCap 未確認 <strong>{fixResult.missing.length}</strong> 筆寫入，這些記錄未被修正
+                <span className="ml-1">(Study ID: {fixResult.missing.join(', ')})</span>
+              </div>
             )}
           </div>
         )}
@@ -276,7 +283,7 @@ export default function QcPage() {
                             onClick={() => {
                               if (hasLink) {
                                 setLastVisited(f.key);
-                                window.open(redcapRecordUrl(f.studyId!, f.redcapPage!), '_blank');
+                                if (data?.redcapBaseUrl) window.open(redcapRecordUrl(data.redcapBaseUrl, f.studyId!, f.redcapPage!), '_blank');
                               }
                             }}
                           >

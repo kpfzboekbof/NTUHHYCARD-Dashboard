@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
       records,
       stats,
       labelers,
+      redcapBaseUrl: await getDataEntryBase(),
       fetchedAt: new Date().toISOString(),
     };
 
@@ -71,9 +73,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'updates 為空或格式不正確' }, { status: 400 });
       }
       const records = cleaned.map(u => ({ study_id: u.studyId, etiology_final: String(u.code) }));
-      const count = await batchImportField(records);
+      const { imported, missing } = await batchImportField(records);
       clearAllCache();
-      return NextResponse.json({ ok: true, count });
+      // `imported` is what REDCap confirmed — the client marks only those as saved.
+      return NextResponse.json({ ok: true, count: imported.length, imported, missing });
     }
 
     const { studyId, code } = body as { studyId?: string; code?: number };

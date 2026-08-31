@@ -1,5 +1,3 @@
-const REDCAP_BASE = 'https://redcap.ntuh.gov.tw/redcap_v16.1.9/DataEntry/index.php?pid=8207';
-
 export interface RsvpLinks {
   baseUrl: string;        // e.g. https://ohca.example.com
   labelerCode: number;
@@ -12,6 +10,8 @@ export function buildReminderEmail(
   incompleteCaseIds: string[],
   idRange?: { from: number | null; to: number | null },
   rsvp?: RsvpLinks,
+  /** Data-entry deep-link base from getDataEntryBase(); links are omitted without it. */
+  redcapBaseUrl?: string,
 ): { subject: string; html: string } {
   const count = incompleteCaseIds.length;
   const isComplete = count === 0;
@@ -29,10 +29,14 @@ export function buildReminderEmail(
 
   const caseRows = incompleteCaseIds
     .map(id => {
-      const url = `${REDCAP_BASE}&id=${id}&page=ntuh_nhi_etiology`;
+      // Without a base the id is still listed, just not linked — better than
+      // mailing out a link pinned to a REDCap version that has moved on.
+      const cell = redcapBaseUrl
+        ? `<a href="${redcapBaseUrl}&id=${encodeURIComponent(id)}&page=ntuh_nhi_etiology" style="color:#2563eb;text-decoration:none;">${id}</a>`
+        : id;
       return `<tr>
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb;font-family:monospace;">
-          <a href="${url}" style="color:#2563eb;text-decoration:none;">${id}</a>
+          ${cell}
         </td>
       </tr>`;
     })

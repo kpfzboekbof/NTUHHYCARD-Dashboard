@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchRecordsByFields, fetchEtiologyStatus, fetchUsers } from '@/lib/redcap/client';
-import { getCatalogSource } from '@/lib/catalog/store';
+import { fetchUsers } from '@/lib/redcap/client';
 import { LEGACY_FORM_BY_UNIT_ID } from '@/lib/catalog/seed';
 import { getAssignments } from '@/lib/owner-store';
-import { getLabelers } from '@/lib/labelers';
-import { buildMatrix } from '@/lib/state/matrix';
-import { catalogFieldSet } from '@/lib/state/snapshot';
+import { deriveCurrentMatrix } from '@/lib/state/build';
+import { getDataEntryBase } from '@/lib/redcap/deep-link';
+import { HOSPITALS } from '@/config/hospitals';
+import { recentHandoffKeys } from '@/lib/db/events';
+import { hasDatabase } from '@/lib/db/client';
+import { listPeople } from '@/lib/people/repo';
 import type { CellState, RecordDerivation, WorkState } from '@/lib/state/types';
 import type { User } from '@/types';
 
@@ -40,6 +42,8 @@ interface UnitSummary {
   category: string;
   sortOrder: number;
   owner: string;
+  /** person.id when the owner's REDCap username is linked in the registry. */
+  ownerPersonId: string | null;
   counts: Record<WorkState, number>;
 }
 
@@ -73,11 +77,11 @@ function emptyCounts(): Record<WorkState, number> {
 }
 
 async function buildSnapshot(): Promise<MatrixSnapshot> {
-  const [{ catalog, version, isSeed, readFailed }, assignments, labelers] = await Promise.all([
-    getCatalogSource(),
+  const [matrix, assignments] = await Promise.all([
+    deriveCurrentMatrix(),
     getAssignments(),
-    getLabelers(),
   ]);
+  const { records } = matrix;
 
   let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
   if (!users) {
@@ -86,29 +90,22 @@ async function buildSnapshot(): Promise<MatrixSnapshot> {
     setCached(USERS_CACHE_KEY, users, 1800);
   }
 
-  const [rows, etiologyRows] = await Promise.all([
-    fetchRecordsByFields(catalogFieldSet(catalog)),
-    fetchEtiologyStatus(),
-  ]);
-
-  const { records } = buildMatrix({ catalog, rows, etiologyRows, labelers });
+  // The person registry link makes a unit's owner nudgeable; without it the
+  // owner is still shown by name, there is just nobody to mail.
+  const people = hasDatabase() ? await listPeople().catch(() => []) : [];
+  const personByUsername = new Map(people.filter(p => p.redcapUsername).map(p => [p.redcapUsername, p.id]));
 
   // Owners still come from the form-keyed assignment map. Phase 5 replaces this
   // with assignment rules; the shape of the response does not change.
-  const visibleUnits = catalog.units.filter(u => !u.hidden);
   const summaries = new Map<string, UnitSummary>(
-    visibleUnits.map(unit => {
+    matrix.units.map(unit => {
       const formName = LEGACY_FORM_BY_UNIT_ID[unit.unitId] ?? unit.unitId;
       const username = assignments[formName];
       const user = username ? users.find(u => u.username === username) : undefined;
       return [unit.unitId, {
-        unitId: unit.unitId,
-        label: unit.label,
-        redcapForm: unit.redcapForm,
-        deepLinkPage: unit.deepLinkPage,
-        category: unit.category,
-        sortOrder: unit.sortOrder,
+        ...unit,
         owner: user?.name || username || UNASSIGNED,
+        ownerPersonId: username ? (personByUsername.get(username) ?? null) : null,
         counts: emptyCounts(),
       }];
     }),
@@ -138,10 +135,10 @@ async function buildSnapshot(): Promise<MatrixSnapshot> {
     records,
     units: [...summaries.values()].sort((a, b) => a.sortOrder - b.sortOrder),
     totals: { records: records.length, excluded, screeningPending, fullyComplete },
-    catalogVersion: version,
-    catalogIsSeed: isSeed,
-    catalogReadFailed: readFailed,
-    fetchedAt: new Date().toISOString(),
+    catalogVersion: matrix.catalogVersion,
+    catalogIsSeed: matrix.catalogIsSeed,
+    catalogReadFailed: matrix.catalogReadFailed,
+    fetchedAt: matrix.fetchedAt,
   };
 }
 
@@ -158,17 +155,42 @@ export async function GET(request: NextRequest) {
     }
 
     const unit = params.get('unit');
-    const state = params.get('state');
+    // Group name (總院/新竹/雲林), matching the header widget — the raw REDCap
+    // codes are an implementation detail nobody filters by.
     const hospital = params.get('hospital');
     const owner = params.get('owner');
+    const studyIdQuery = params.get('studyId');
     const limit = Math.min(Number(params.get('limit')) || DEFAULT_LIMIT, MAX_LIMIT);
     const offset = Math.max(Number(params.get('offset')) || 0, 0);
 
-    if (state && !ALL_STATES.includes(state as WorkState)) {
+    // Comma-separated states, so the queue's default view (ready|in_progress)
+    // is one request rather than two stitched together client-side.
+    const stateParam = params.get('state');
+    const states = stateParam ? stateParam.split(',').filter(Boolean) as WorkState[] : null;
+    const badState = states?.find(s => !ALL_STATES.includes(s));
+    if (badState) {
       return NextResponse.json(
-        { error: `未知的 state：${state}。可用值：${ALL_STATES.join(', ')}` },
+        { error: `未知的 state：${badState}。可用值：${ALL_STATES.join(', ')}` },
         { status: 400 },
       );
+    }
+    const stateSet = states ? new Set(states) : null;
+
+    // `since=7d` (or an ISO timestamp): only cells with a recorded handoff —
+    // became_ready or entered_awaiting_verify — since then. A filter over the
+    // event stream, not an unread count: it is correct however often it is
+    // asked, and empty until the snapshot cron has run at least twice.
+    const sinceParam = params.get('since');
+    let recentKeys: Set<string> | null = null;
+    if (sinceParam) {
+      const dayMatch = /^(\d{1,3})d$/.exec(sinceParam);
+      const cutoff = dayMatch
+        ? new Date(Date.now() - Number(dayMatch[1]) * 86_400_000)
+        : new Date(sinceParam);
+      if (Number.isNaN(cutoff.getTime())) {
+        return NextResponse.json({ error: `無法解析 since：${sinceParam}（用 7d 或 ISO 時間）` }, { status: 400 });
+      }
+      recentKeys = await recentHandoffKeys(cutoff.toISOString());
     }
 
     const ownerByUnit = new Map(snapshot.units.map(u => [u.unitId, u.owner]));
@@ -178,11 +200,13 @@ export async function GET(request: NextRequest) {
     let matched = 0;
 
     for (const record of snapshot.records) {
-      if (hospital && String(record.hospital) !== hospital) continue;
+      if (hospital && (HOSPITALS[record.hospital] ?? String(record.hospital)) !== hospital) continue;
+      if (studyIdQuery && !record.studyId.includes(studyIdQuery)) continue;
 
       for (const cell of record.cells) {
         if (unit && cell.unitId !== unit) continue;
-        if (state && cell.state !== state) continue;
+        if (stateSet && !stateSet.has(cell.state)) continue;
+        if (recentKeys && !recentKeys.has(`${record.studyId}|${cell.unitId}`)) continue;
 
         const cellOwner = ownerByUnit.get(cell.unitId) ?? UNASSIGNED;
         if (owner && cellOwner !== owner) continue;
@@ -194,7 +218,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const redcapBaseUrl = await getDataEntryBase();
+
     return NextResponse.json({
+      redcapBaseUrl,
       units: snapshot.units,
       totals: snapshot.totals,
       catalogVersion: snapshot.catalogVersion,

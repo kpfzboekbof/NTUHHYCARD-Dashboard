@@ -36,6 +36,9 @@ const OWNED_TABLES = new Set([
   'person',
   'audit_log',
   'login_token',
+  'work_event',
+  'outbound_mail',
+  'batch',
 ]);
 
 const client = new Client(url);

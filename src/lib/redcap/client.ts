@@ -1,4 +1,5 @@
 import { REDCAP_FORM_NAMES, CORE_ASSISTANT_REQUIRED_FIELDS, CORE_ASSISTANT_REQUIRED_FIELDS_NON_ER, CORE_ASSISTANT_CHECKBOX_FIELDS, OUTCOME_ASSISTANT_REQUIRED_FIELDS } from '@/config/forms';
+import { getCachedAsync, setCached } from '@/lib/cache';
 import type { RawCompletionRecord, RawLogEntry, RawUser } from './types';
 
 const REDCAP_URL = process.env.REDCAP_URL || 'https://redcap.ntuh.gov.tw/api/';
@@ -70,6 +71,88 @@ async function exportRecords(fields: string[]): Promise<RedcapRow[]> {
   return parsed.map(normalizeRow);
 }
 
+/** The project's repeating instruments, cached for a day. */
+async function fetchRepeatingForms(): Promise<Set<string>> {
+  const cached = await getCachedAsync<string[]>('redcap_repeating_forms');
+  if (cached) return new Set(cached);
+
+  const res = await redcapPost({ content: 'repeatingFormsEvents', format: 'json' });
+  const parsed = await redcapJson(res);
+  const forms = Array.isArray(parsed)
+    ? parsed.map(row => String((row as Record<string, unknown>).form_name ?? '')).filter(Boolean)
+    : [];
+  setCached('redcap_repeating_forms', forms, 86_400);
+  return new Set(forms);
+}
+
+/** field → form, from the data dictionary; `<form>_complete` maps to its form. */
+async function formOfField(): Promise<(field: string) => string | null> {
+  const cached = await getCachedAsync<Record<string, string>>('redcap_field_forms');
+  let byField = cached;
+  if (!byField) {
+    const meta = await fetchMetadata();
+    byField = {};
+    for (const row of meta) {
+      if (row.field_name) byField[row.field_name] = row.form_name;
+    }
+    setCached('redcap_field_forms', byField, 3600);
+  }
+  const map = byField;
+  return (field: string) => map[field] ?? (field.endsWith('_complete') ? field.slice(0, -'_complete'.length) : null);
+}
+
+async function exportWithRetry(fields: string[]): Promise<RedcapRow[]> {
+  try {
+    return await exportRecords(fields);
+  } catch (first) {
+    // The server has been seen answering 500 under load and recovering; one
+    // pause-and-retry per request keeps a 16-request split from dying on a
+    // single hiccup without hammering an already struggling server.
+    console.error(`REDCap export failed (${fields.length} fields), retrying in 5s:`, first);
+    await new Promise(resolve => setTimeout(resolve, 5_000));
+    return exportRecords(fields);
+  }
+}
+
+/**
+ * A wide export, split so REDCap can actually serve it.
+ *
+ * One flat request for N fields returns every repeat row of every touched
+ * repeating instrument with all N columns attached — measured at ~575MB of
+ * mostly empty strings for the catalog's field set, which the server answers
+ * with a 500 (or worse, a 200 with an empty body). Splitting by residence
+ * keeps each response small: fields on non-repeating forms come back as main
+ * rows only (7k rows), and each repeating instrument's fields are fetched on
+ * their own (its repeats + mains, a few MB). Requests run sequentially — the
+ * point is to be gentle with a server that has already shown it can buckle.
+ *
+ * Concatenating the responses is sound because downstream merging keys on
+ * (study_id, repeat instrument) and skips empty values.
+ */
+export async function fetchRecordsByFieldsSplit(fields: string[]): Promise<RedcapRow[]> {
+  const [repeating, resolveForm] = await Promise.all([fetchRepeatingForms(), formOfField()]);
+
+  const mainFields: string[] = [];
+  const byRepeatForm = new Map<string, string[]>();
+  for (const field of fields) {
+    const form = resolveForm(field);
+    if (form && repeating.has(form)) {
+      (byRepeatForm.get(form) ?? byRepeatForm.set(form, []).get(form)!).push(field);
+    } else {
+      mainFields.push(field);
+    }
+  }
+  if (!mainFields.includes('study_id')) mainFields.unshift('study_id');
+
+  let rows = await exportWithRetry(mainFields);
+  for (const formFields of byRepeatForm.values()) {
+    // concat, not push(...batch): spreading 150k rows as arguments overflows
+    // the call stack.
+    rows = rows.concat(await exportWithRetry(['study_id', ...formFields]));
+  }
+  return rows;
+}
+
 /** Aggregate repeat-instrument rows: keep max completion status per study_id per form */
 function aggregateRepeatRows(rows: Record<string, string>[]): RawCompletionRecord[] {
   const map = new Map<string, RawCompletionRecord>();
@@ -116,15 +199,9 @@ export async function fetchCompletionStatus(): Promise<RawCompletionRecord[]> {
   // Include ntuh_nhi_core_complete for Core 醫師 virtual form
   const fields = ['study_id', 'hospital', 'exclusion', 'sur_icu', 'ntuh_nhi_core_complete', 'ntuh_nhi_outcome_complete', ...REDCAP_FORM_NAMES.map(f => `${f}_complete`)];
 
-  return aggregateRepeatRows(await exportRecords(fields));
-}
-
-/**
- * Export an arbitrary field set — used by the state engine, whose fields are
- * computed from the work-unit catalog rather than fixed in code.
- */
-export async function fetchRecordsByFields(fields: string[]): Promise<RedcapRow[]> {
-  return exportRecords(fields);
+  // Split by instrument residence: this export touches a dozen repeating
+  // forms, and the flat version is the request REDCap answers with a 500.
+  return aggregateRepeatRows(await fetchRecordsByFieldsSplit(fields));
 }
 
 export async function fetchUsers(): Promise<RawUser[]> {

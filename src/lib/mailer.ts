@@ -1,6 +1,10 @@
 import { headers } from 'next/headers';
 import * as nodemailer from 'nodemailer';
 
+// Re-exported for callers already inside a request; the definition lives in
+// mail/escape so body builders can be tested without Next.
+export { escapeHtml } from './mail/escape';
+
 /**
  * The one outbound mail channel and the one way to work out this app's public
  * URL, shared by the etiology reminder and the login link.

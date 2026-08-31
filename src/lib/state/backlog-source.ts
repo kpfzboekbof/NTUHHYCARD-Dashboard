@@ -1,4 +1,5 @@
-import { getCachedAsync } from '@/lib/cache';
+import { getCachedAsync, setCached } from '@/lib/cache';
+import { fetchUsers } from '@/lib/redcap/client';
 import { getAssignments } from '@/lib/owner-store';
 import { listPeople } from '@/lib/people/repo';
 import { hasDatabase } from '@/lib/db/client';
@@ -27,13 +28,33 @@ export interface BacklogSnapshot {
   fetchedAt: string;
 }
 
+/**
+ * REDCap username → name, shared with the matrix route's cache entry so the
+ * two views name the same person the same way and pay for one export.
+ */
+async function redcapDirectory(): Promise<Map<string, string>> {
+  let users = await getCachedAsync<Array<{ username: string; name: string }>>('redcap_users');
+  if (!users) {
+    try {
+      const raw = await fetchUsers();
+      users = raw.map(u => ({ username: u.username, name: `${u.lastname ?? ''}${u.firstname ?? ''}`.trim() }));
+      setCached('redcap_users', users, 1800);
+    } catch {
+      // A directory lookup failure costs nicer labels, never the backlog.
+      return new Map();
+    }
+  }
+  return new Map(users.filter(u => u.name).map(u => [u.username, u.name]));
+}
+
 export async function loadBacklog(scope: BacklogScope = {}): Promise<BacklogSnapshot> {
   const cached = await getCachedAsync<CachedMatrix>('state-matrix');
   const matrix: CachedMatrix = cached?.records && cached.units ? cached : await deriveCurrentMatrix();
 
-  const [assignments, people] = await Promise.all([
+  const [assignments, people, directory] = await Promise.all([
     getAssignments(),
     hasDatabase() ? listPeople(true).catch(() => []) : Promise.resolve([]),
+    redcapDirectory(),
   ]);
 
   return {
@@ -42,6 +63,7 @@ export async function loadBacklog(scope: BacklogScope = {}): Promise<BacklogSnap
       units: matrix.units,
       assignments,
       people,
+      directory,
       scope,
     }),
     units: matrix.units,

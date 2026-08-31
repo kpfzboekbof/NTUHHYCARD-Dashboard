@@ -28,12 +28,24 @@ export interface UnitBacklog extends UnitRef {
   awaiting: string[];
 }
 
+/**
+ * Where this person's name came from, which is also how reachable they are.
+ *
+ * - `registry`: a person row — has an email, can be mailed.
+ * - `directory`: REDCap knows the account and its owner's name, but nobody has
+ *   imported them into the registry yet, so there is no address to mail.
+ * - `unknown`: the assignment names an account REDCap itself does not have.
+ *   No import will ever fix this; the assignment is stale.
+ */
+export type NameSource = 'registry' | 'directory' | 'unknown';
+
 export interface PersonBacklog {
   /** Null when the assignment names a REDCap username no person row matches. */
   personId: string | null;
   /** The REDCap username the assignment is keyed on. */
   username: string;
   displayName: string;
+  nameSource: NameSource;
   email: string | null;
   units: UnitBacklog[];
   readyCount: number;
@@ -63,6 +75,14 @@ export interface BacklogInput {
   /** Legacy form name → REDCap username. Phase 5 replaces this with rules. */
   assignments: OwnerAssignments;
   people: PersonRef[];
+  /**
+   * REDCap username → the account owner's name, from REDCap's own user list.
+   *
+   * Showing a raw username where a name is available reads as a system that
+   * does not know who its own people are, so this is used whenever the
+   * registry has no row — which is every row until somebody runs the import.
+   */
+  directory?: Map<string, string>;
   scope?: BacklogScope;
 }
 
@@ -78,7 +98,7 @@ function unitInScope(unitId: string, unitIds?: string[]): boolean {
  * remaining" trains the recipient to ignore the sender.
  */
 export function computeBacklog(input: BacklogInput): PersonBacklog[] {
-  const { records, units, assignments, people, scope = {} } = input;
+  const { records, units, assignments, people, directory, scope = {} } = input;
   const { studyIdCutoff = null, unitIds } = scope;
 
   const personByUsername = new Map<string, PersonRef>();
@@ -127,6 +147,7 @@ export function computeBacklog(input: BacklogInput): PersonBacklog[] {
   const result: PersonBacklog[] = [];
   for (const [username, units] of byUsername) {
     const person = personByUsername.get(username);
+    const directoryName = directory?.get(username);
     const unitList = [...units.values()].sort((a, b) => b.ready.length + b.awaiting.length - (a.ready.length + a.awaiting.length));
     const readyCount = unitList.reduce((n, u) => n + u.ready.length, 0);
     const awaitingCount = unitList.reduce((n, u) => n + u.awaiting.length, 0);
@@ -134,7 +155,8 @@ export function computeBacklog(input: BacklogInput): PersonBacklog[] {
     result.push({
       personId: person?.id ?? null,
       username,
-      displayName: person?.displayName ?? username,
+      displayName: person?.displayName ?? directoryName ?? username,
+      nameSource: person ? 'registry' : directoryName ? 'directory' : 'unknown',
       email: person?.email ?? null,
       units: unitList,
       readyCount,

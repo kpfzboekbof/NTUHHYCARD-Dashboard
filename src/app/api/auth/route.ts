@@ -1,32 +1,44 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { ADMIN_COOKIE_NAME, expectedAdminToken, legacyAuthEnabled } from '@/lib/auth';
+import { resolveIdentity } from '@/lib/auth/identity';
+import { SESSION_COOKIE_NAME, satisfiesRole } from '@/lib/auth/session';
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const TOKEN_NAME = 'admin_token';
-// Simple token: hash of password + a fixed salt
-function generateToken(): string {
-  const data = `${ADMIN_PASSWORD}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
+/**
+ * The admin-level shared password.
+ *
+ * Kept working while people move onto individual logins: GET now answers for
+ * either credential, so a manager who signed in with a magic link sees the
+ * admin pages without also typing the shared password.
+ */
+
+const TOKEN_NAME = ADMIN_COOKIE_NAME;
 
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
 
-    if (!ADMIN_PASSWORD) {
+    if (!legacyAuthEnabled()) {
+      return NextResponse.json(
+        { error: '共用密碼已停用，請改用 email 登入連結' },
+        { status: 410 },
+      );
+    }
+
+    const adminPassword = process.env.ADMIN_PASSWORD || '';
+
+    if (!adminPassword) {
       return NextResponse.json({ error: '未設定 ADMIN_PASSWORD 環境變數' }, { status: 500 });
     }
 
-    if (password !== ADMIN_PASSWORD) {
+    if (password !== adminPassword) {
       return NextResponse.json({ error: '密碼錯誤' }, { status: 401 });
     }
 
-    const token = generateToken();
+    const token = expectedAdminToken();
+    if (!token) {
+      return NextResponse.json({ error: '無法產生登入權杖' }, { status: 500 });
+    }
     const response = NextResponse.json({ ok: true });
     response.cookies.set(TOKEN_NAME, token, {
       httpOnly: true,
@@ -41,18 +53,27 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(TOKEN_NAME)?.value;
-  const expected = generateToken();
-
-  if (!ADMIN_PASSWORD || !token || token !== expected) {
-    return NextResponse.json({ authenticated: false });
-  }
-  return NextResponse.json({ authenticated: true });
+  const identity = await resolveIdentity();
+  const authenticated = !!identity && satisfiesRole(identity.roles, 'manager');
+  return NextResponse.json({ authenticated });
 }
 
+/**
+ * Sign out.
+ *
+ * Drops the individual session as well as the shared admin cookie — otherwise
+ * 登出 does nothing at all for someone who signed in with a magic link. That
+ * makes the button mean two different things depending on how you signed in,
+ * so the answer says which happened: `sessionCleared` means the caller is now
+ * signed out of the whole dashboard and should go to /login, rather than sit on
+ * a page it can no longer load.
+ */
 export async function DELETE() {
-  const response = NextResponse.json({ ok: true });
+  const jar = await cookies();
+  const sessionCleared = !!jar.get(SESSION_COOKIE_NAME)?.value;
+
+  const response = NextResponse.json({ ok: true, sessionCleared });
   response.cookies.delete(TOKEN_NAME);
+  response.cookies.delete(SESSION_COOKIE_NAME);
   return response;
 }

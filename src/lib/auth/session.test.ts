@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createSessionToken, verifySessionToken, hasRole,
+  createSessionToken, verifySessionToken, hasRole, satisfiesRole,
   SESSION_TTL_SECONDS, type Role,
 } from './session.ts';
 
@@ -57,4 +57,14 @@ test('role checks read from the verified payload', () => {
   assert.equal(hasRole(payload, 'abstractor'), true);
   assert.equal(hasRole(payload, 'manager'), false);
   assert.equal(hasRole(null, 'viewer'), false);
+});
+
+test('manager satisfies every role; viewer is satisfied by any signed-in role', () => {
+  assert.equal(satisfiesRole(['manager'], 'abstractor'), true);
+  assert.equal(satisfiesRole(['manager'], 'viewer'), true);
+  assert.equal(satisfiesRole(['labeler'], 'viewer'), true);
+  assert.equal(satisfiesRole(['labeler'], 'manager'), false);
+  assert.equal(satisfiesRole(['labeler'], 'labeler'), true);
+  // An identity with no roles is not a viewer — that is the unauthenticated case.
+  assert.equal(satisfiesRole([], 'viewer'), false);
 });

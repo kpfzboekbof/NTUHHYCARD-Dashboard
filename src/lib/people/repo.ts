@@ -145,12 +145,58 @@ export async function createPerson(input: PersonInput, actor: Actor): Promise<Pe
   return person;
 }
 
+/**
+ * Create several people in one transaction.
+ *
+ * A first import of a REDCap project is dozens of rows; one HTTP round trip
+ * each is well past a serverless function's budget, and a timeout half way
+ * leaves the registry partly populated with nobody to tell. All or nothing,
+ * in one trip.
+ */
+export async function createPeople(inputs: PersonInput[], actor: Actor): Promise<Person[]> {
+  if (inputs.length === 0) return [];
+  const sql = getSql();
+
+  const people: Person[] = inputs.map(input => ({
+    id: newId(),
+    redcapUsername: input.redcapUsername ?? null,
+    labelerCode: input.labelerCode ?? null,
+    displayName: input.displayName,
+    email: input.email,
+    roles: input.roles ?? ['viewer'],
+    broadcastOptOut: input.broadcastOptOut ?? false,
+    notifyPref: input.notifyPref ?? 'digest',
+    active: input.active ?? true,
+  }));
+
+  await sql.transaction(people.flatMap(person => [
+    sql`
+      INSERT INTO person (id, redcap_username, labeler_code, display_name, email,
+                          roles, broadcast_opt_out, notify_pref, active)
+      VALUES (${person.id}, ${person.redcapUsername}, ${person.labelerCode},
+              ${person.displayName}, ${person.email}, ${person.roles},
+              ${person.broadcastOptOut}, ${person.notifyPref}, ${person.active})
+    `,
+    auditQuery(sql, {
+      actor,
+      action: 'person.create',
+      entityType: 'person',
+      entityId: person.id,
+      after: person,
+    }),
+  ]));
+
+  return people;
+}
+
 export async function updatePerson(
   id: string,
   changes: Partial<PersonInput>,
   actor: Actor,
+  /** The current row, when the caller already has it — saves a read. */
+  known?: Person,
 ): Promise<Person> {
-  const before = await findById(id);
+  const before = known ?? await findById(id);
   if (!before) throw new Error(`找不到人員 ${id}`);
 
   const after: Person = {

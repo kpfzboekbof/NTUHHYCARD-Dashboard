@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
-  Home, LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope, ShieldCheck, HeartPulse,
+  Home, LayoutDashboard, Grid3X3, Users, Shield, ListChecks, Keyboard, Stethoscope, ShieldCheck, HeartPulse, UserCog,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/productivity',  label: '鍵入進度',     icon: Keyboard },
   { href: '/screening',     label: 'OHCA病人擷取', icon: HeartPulse },
   { href: '/assign',        label: '管理者',       icon: Shield },
+  { href: '/admin/people',  label: '人員登記',     icon: UserCog },
 ];
 
 interface SidebarProps {

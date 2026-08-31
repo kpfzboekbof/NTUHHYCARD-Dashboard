@@ -1,22 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
 import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAudit, recordAuditMany } from '@/lib/db/audit';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
-
-function generateAdminToken(): string {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
 
 const CACHE_KEY = 'etiology';
 
@@ -51,16 +41,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    // Verify admin auth
-    const cookieStore = await cookies();
-    const token = cookieStore.get('admin_token')?.value;
-    const expected = generateAdminToken();
-    const adminPw = process.env.ADMIN_PASSWORD || '';
-    if (!adminPw || !token || token !== expected) {
-      return NextResponse.json({ error: '未授權，請先以管理員身份登入' }, { status: 401 });
-    }
+  // Writing etiology_final back to REDCap is a manager action, and from here
+  // on the audit row says which manager.
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
+  try {
     const body = await request.json();
 
     // Batch mode — used by the consensus meeting "auto-fill green" flow.
@@ -75,6 +61,18 @@ export async function POST(request: NextRequest) {
       const records = cleaned.map(u => ({ study_id: u.studyId, etiology_final: String(u.code) }));
       const { imported, missing } = await batchImportField(records);
       clearAllCache();
+
+      // Audit what REDCap confirmed, one row per record: "who set 5123's
+      // etiology_final to 7, and when" is the question this answers.
+      const byId = new Map(cleaned.map(u => [u.studyId, u.code]));
+      await recordAuditMany(imported.map(studyId => ({
+        actor: auth.identity.actor,
+        action: 'etiology_final.write',
+        entityType: 'record',
+        entityId: studyId,
+        after: { etiology_final: byId.get(studyId), batch: true },
+      })));
+
       // `imported` is what REDCap confirmed — the client marks only those as saved.
       return NextResponse.json({ ok: true, count: imported.length, imported, missing });
     }
@@ -88,6 +86,14 @@ export async function POST(request: NextRequest) {
 
     // Clear etiology cache so next fetch reflects the change
     clearAllCache();
+
+    await recordAudit({
+      actor: auth.identity.actor,
+      action: 'etiology_final.write',
+      entityType: 'record',
+      entityId: studyId,
+      after: { etiology_final: code },
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

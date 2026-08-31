@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchQcRecords, batchImportField } from '@/lib/redcap/client';
 import { clearAllCache } from '@/lib/cache';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAuditMany } from '@/lib/db/audit';
 
 /**
  * POST /api/qc/fix
  * Body: { checkId: string }
  *
  * Batch-fix known QC issues by importing corrected values into REDCap.
+ *
+ * This route had no authorization of its own: the site-wide proxy asks for the
+ * shared user password, and everyone who knows it could batch-write to the
+ * production REDCap project. It is a manager action now, and audited per
+ * record REDCap confirms.
  */
 
 type FixResult = { updated: number; studyIds: string[]; missing: string[] };
@@ -28,6 +35,9 @@ const FIX_HANDLERS: Record<string, (rows: Record<string, string>[]) => { records
 };
 
 export async function POST(request: NextRequest) {
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
+
   try {
     const body = await request.json();
     const checkId = body?.checkId as string;
@@ -50,6 +60,14 @@ export async function POST(request: NextRequest) {
     // Report the records REDCap confirmed, not the ones we asked it to write.
     const { imported, missing } = await batchImportField(records);
     clearAllCache();
+
+    await recordAuditMany(imported.map(studyId => ({
+      actor: auth.identity.actor,
+      action: 'qc_fix.apply',
+      entityType: 'record',
+      entityId: studyId,
+      after: { checkId },
+    })));
 
     return NextResponse.json({
       updated: imported.length,

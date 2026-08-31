@@ -8,7 +8,8 @@ export const FORMS: FormConfig[] = [
   { name: 'ntuh_nhi_core_assistant',     label: 'Core 助理',       target: 6000 },
   { name: 'ntuh_nhi_core_doctor',        label: 'Core 醫師',       target: 6000 },
   { name: 'ntuh_nhi_core_cpr',          label: 'Core CPR',         target: 6000 },
-  { name: 'ntuh_nhi_ed_vital',          label: 'ED Vital',         target: 6000 },
+  // 2 of 7,053 eligible patients have any ED Vital row at all (2026-08-31).
+  { name: 'ntuh_nhi_ed_vital',          label: 'ED Vital',         target: 6000, pendingEntry: true },
   { name: 'h14trauma_ohca_transfusion', label: 'Trauma',           target: 2000 },
   { name: 'ntuh_nhi_lab_ed',            label: 'Lab ED',           target: 6000 },
   { name: 'ntuh_nhi_lab_icu',           label: 'Lab ICU',          target: 6000 },
@@ -24,7 +25,8 @@ export const FORMS: FormConfig[] = [
   { name: 'ntuh_exam_patho',           label: 'Patho',            target: 500 },
   { name: 'ntuh_exam_lft_2',           label: 'LFT',              target: 1000 },
   { name: 'ntuh_exam_eeg',             label: 'EEG',              target: 1000 },
-  { name: 'ntuh_exam_ct',              label: 'CT',               target: 2000 },
+  // Not one of the 7,169 records has a single CT field filled in (2026-08-31).
+  { name: 'ntuh_exam_ct',              label: 'CT',               target: 2000, pendingEntry: true },
   { name: 'ntuh_nhi_etiology',         label: 'Etiology',         target: 6000 },
   { name: 'ntuh_nhi_outcome_assistant', label: 'Outcome 助理',    target: 6000 },
   { name: 'ntuh_nhi_outcome_doctor',    label: 'Outcome 醫師',    target: 6000 },

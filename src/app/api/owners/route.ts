@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { getCachedAsync, setCached } from '@/lib/cache';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAudit } from '@/lib/db/audit';
 import { fetchUsers } from '@/lib/redcap/client';
 import { getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
 import { getLabelers, setLabelers } from '@/lib/labelers';
@@ -41,34 +42,62 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  try {
-    // Verify admin auth
-    const cookieStore = await cookies();
-    const token = cookieStore.get('admin_token')?.value;
-    const adminPw = process.env.ADMIN_PASSWORD || '';
-    const data = `${adminPw}-ohca-admin-salt`;
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      hash = ((hash << 5) - hash) + data.charCodeAt(i);
-      hash |= 0;
-    }
-    const expected = Math.abs(hash).toString(36);
-    if (!adminPw || !token || token !== expected) {
-      return NextResponse.json({ error: '未授權' }, { status: 401 });
-    }
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
+  try {
     const body: { assignments?: OwnerAssignments; hiddenForms?: string[]; targetIds?: TargetIds; labelers?: Labeler[] } = await request.json();
+
+    // Assignments used to overwrite one blob with no history at all, so
+    // "who moved this form to me, and when" had no answer. Record the previous
+    // value alongside the new one.
     if (body.assignments !== undefined) {
+      const before = await getAssignments();
       await setAssignments(body.assignments);
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'assignments.set',
+        entityType: 'owner_assignments',
+        entityId: 'global',
+        before,
+        after: body.assignments,
+      });
     }
     if (body.hiddenForms !== undefined) {
+      const before = await getHiddenForms();
       await setHiddenForms(body.hiddenForms);
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'hidden_forms.set',
+        entityType: 'owner_assignments',
+        entityId: 'hiddenForms',
+        before,
+        after: body.hiddenForms,
+      });
     }
     if (body.targetIds !== undefined) {
+      const before = await getTargetIds();
       await setTargetIds(body.targetIds);
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'target_ids.set',
+        entityType: 'owner_assignments',
+        entityId: 'targetIds',
+        before,
+        after: body.targetIds,
+      });
     }
     if (body.labelers !== undefined) {
+      const before = await getLabelers();
       await setLabelers(body.labelers);
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'labelers.set',
+        entityType: 'labelers',
+        entityId: 'global',
+        before,
+        after: body.labelers,
+      });
     }
     return NextResponse.json({ ok: true });
   } catch (error) {

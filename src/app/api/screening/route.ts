@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { list, get } from '@vercel/blob';
+import { requireRole } from '@/lib/auth/identity';
+import type { ScreeningReview } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,31 +20,16 @@ async function readPrivateJson(pathname: string): Promise<unknown | null> {
   }
 }
 
-/** Verify admin auth (cookie-based, for Dashboard UI) */
-async function isAuthenticated(): Promise<boolean> {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  if (!adminPw) return false;
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  const expected = Math.abs(hash).toString(36);
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  return token === expected;
-}
-
 /**
  * GET /api/screening?month=2025-06
  *
  * 讀取指定月份的所有每日 JSON（從 Vercel Blob），合併回傳。
  */
 export async function GET(request: NextRequest) {
-  if (!await isAuthenticated()) {
-    return NextResponse.json({ error: '未授權' }, { status: 401 });
-  }
+  // Identifiable patient records the study has not yet accepted — manager only,
+  // as before.
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
   const month = request.nextUrl.searchParams.get('month')
     || new Date().toISOString().slice(0, 7);
@@ -53,7 +39,7 @@ export async function GET(request: NextRequest) {
   const { blobs } = await list({ prefix });
 
   // 讀取審核紀錄
-  let reviews: Record<string, { decision: string; reviewedAt: string }> = {};
+  let reviews: Record<string, ScreeningReview> = {};
   const reviewBlob = blobs.find(b => b.pathname.endsWith('/_reviews.json'));
   if (reviewBlob) {
     const content = await readPrivateJson(reviewBlob.pathname);
@@ -141,8 +127,9 @@ export async function GET(request: NextRequest) {
     for (const patient of content.patients || []) {
       const id = patient.id as string | undefined;
       if (id && reviews[id]) {
-        patient.reviewed = reviews[id].decision;
+        patient.reviewed = reviews[id].decision as typeof patient.reviewed;
         patient.reviewedAt = reviews[id].reviewedAt;
+        patient.decidedBy = reviews[id].decidedBy;
       }
       patient.date = dateStr;
       allPatients.push(patient);

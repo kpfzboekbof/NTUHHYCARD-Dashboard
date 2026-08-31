@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies, headers } from 'next/headers';
-import * as nodemailer from 'nodemailer';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -8,37 +6,10 @@ import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
+import { createTransporter, resolveBaseUrl } from '@/lib/mailer';
+import { requireRole } from '@/lib/auth/identity';
+import { recordAudit } from '@/lib/db/audit';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
-
-function generateAdminToken(): string {
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  const data = `${adminPw}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-async function verifyAdmin(): Promise<boolean> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('admin_token')?.value;
-  const expected = generateAdminToken();
-  const adminPw = process.env.ADMIN_PASSWORD || '';
-  return !!(adminPw && token && token === expected);
-}
-
-function createTransporter() {
-  const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
-  if (!user || !pass) return null;
-
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user, pass },
-  });
-}
 
 /** Filter incomplete records by ID range */
 function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo: number | null): EtiologyRecord[] {
@@ -46,23 +17,6 @@ function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo:
   if (idFrom != null) result = result.filter(r => parseInt(r.studyId) >= idFrom);
   if (idTo != null) result = result.filter(r => parseInt(r.studyId) <= idTo);
   return result;
-}
-
-/** Resolve the public base URL used to build links inside emails. */
-async function resolveBaseUrl(): Promise<string> {
-  const explicit = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_BASE_URL;
-  if (explicit) return explicit.replace(/\/$/, '');
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel.replace(/\/$/, '')}`;
-  // Fall back to the inbound request's host so dev and self-hosted setups
-  // still produce a clickable link.
-  try {
-    const h = await headers();
-    const host = h.get('x-forwarded-host') || h.get('host');
-    const proto = h.get('x-forwarded-proto') || 'http';
-    if (host) return `${proto}://${host}`;
-  } catch {}
-  return 'http://localhost:3000';
 }
 
 /** GET — reminder status: per-labeler incomplete counts + meeting settings */
@@ -113,21 +67,29 @@ export async function GET() {
 
 /** POST — send reminder emails or update meeting settings */
 export async function POST(request: NextRequest) {
-  try {
-    if (!(await verifyAdmin())) {
-      return NextResponse.json({ error: '未授權，請先以管理員身份登入' }, { status: 401 });
-    }
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
 
+  try {
     const body = await request.json();
 
     // Update meeting settings (date + ID range)
     if (body.action === 'updateSettings') {
+      const before = await getMeetingSettings();
       const settings = await updateMeetingSettings(current => ({
         ...current,
         meetingDate: 'meetingDate' in body ? (body.meetingDate || null) : current.meetingDate,
         idFrom: 'idFrom' in body ? (body.idFrom ?? null) : current.idFrom,
         idTo: 'idTo' in body ? (body.idTo ?? null) : current.idTo,
       }));
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'meeting_settings.update',
+        entityType: 'meeting',
+        entityId: settings.meetingDate ?? 'unset',
+        before,
+        after: settings,
+      });
       return NextResponse.json({ ok: true, ...settings });
     }
 
@@ -204,6 +166,18 @@ export async function POST(request: NextRequest) {
       // an RSVP that arrived meanwhile would otherwise be erased.
       const sentAt = new Date().toISOString();
       await updateMeetingSettings(current => ({ ...current, reminderSentAt: sentAt }));
+
+      await recordAudit({
+        actor: auth.identity.actor,
+        action: 'reminder.send',
+        entityType: 'meeting',
+        entityId: settings.meetingDate,
+        after: {
+          sentAt,
+          sent: results.filter(r => r.success).map(r => r.email),
+          failed: results.filter(r => !r.success).map(r => r.email),
+        },
+      });
 
       return NextResponse.json({ ok: true, results, sentAt });
     }

@@ -1,9 +1,11 @@
 # NTUH OHCA Registry 管理系統重新設計書
 
-> **版本**：v1.0（2026-08-30）
+> **版本**：v1.1（2026-08-31）
 > **委託人**：G03360（資料庫主要負責人）
 > **目的**：本文件是「設計交付物」——由另一個 AI model 依此實作。設計目標是在**延續現有 Dashboard 管理模式**的前提下，重建整套人員／進度／交接管理系統。
 > **設計方法**：本設計由 5 個獨立設計方案（狀態機優先、人員當責優先、最小演進、設定驅動、理想藍圖）經 3 位不同視角評審交叉評分後，以最高分方案為主幹、嫁接其餘方案的優點合成。
+>
+> **v1.1 修正的前提**：v1.0 假設十幾位同仁會各自登入 Dashboard 看自己的佇列。**這個假設是錯的**——見 §1.5。Dashboard 是**負責人一個人的監控工具**，其他人只在 REDCap 裡鍵入資料，不會進這個系統。已完成的 Phase 0–3 不受影響（狀態矩陣、目錄、稽核都是算給負責人看的），但 §7 通知模型、§12 頁面、§15 Phase 4–8 依此重寫。
 
 ---
 
@@ -19,7 +21,9 @@
 
 一個**純函數**把每次 REDCap 快照轉換成「病人 × 工作單元」的**狀態矩陣**（**6 種基礎狀態**：`not_applicable` / `blocked` / `ready` / `in_progress` / `entered_awaiting_verify` / `complete`，外加獨立的 `flagged` 覆蓋層）；比較前後兩次快照的差異就得到**交接事件**（「Outcome 助理填了 sur_icu=1 → 病人 5123 的 Lab ICU 變成 ready → 通知負責人」）。
 
-個人工作佇列、通知、每人／每病人進度、QC flag 路由——全部變成同一個矩陣與事件流之上的「視圖」。**REDCap 仍是唯一資料來源與唯一輸入介面；Dashboard 仍是佇列＋深連結；現有側欄的頁面分類全部保留、就地演進。**
+每人／每病人進度、待催辦清單、QC flag 路由、外寄提醒——全部變成同一個矩陣與事件流之上的「視圖」。**REDCap 仍是唯一資料來源與唯一輸入介面；Dashboard 仍是佇列＋深連結；現有側欄的頁面分類全部保留、就地演進。**
+
+**這些視圖只有一位讀者**（§1.5）。系統的產出因此只有兩種形狀：負責人在畫面上看到的東西，以及**直接寄到鍵入者信箱的信**——不是等他們登入才看得到的站內通知。
 
 ---
 
@@ -59,6 +63,22 @@
 11. 快取分層與可見的資料新鮮度（更新時間戳、手動重新抓取）。
 12. 排除語意（exclusion）與三院區群組心智模型（生醫/竹東→新竹、斗六/虎尾→雲林）。
 
+### 1.5 使用模型（v1.1 修正的核心前提）
+
+**Dashboard 只有一位使用者：資料庫負責人。** 其他十幾位同仁在 REDCap 裡鍵入資料，不會登入這個系統、不會看站內通知、不會有自己的頁面。
+
+這不是規模問題而是形狀問題，它決定了幾件事：
+
+| v1.0 的假設 | 實際情況 | 設計後果 |
+|---|---|---|
+| 每人登入看自己的 `/me` 佇列 | 沒有人會登入 | 佇列是**負責人**的視圖，可依人篩選；不需要每人一頁 |
+| 站內鈴鐺 + 未讀通知 | 沒有收件者 | 移除。`notification` 表改為**外寄信件流水帳**（§7） |
+| 每日 digest 推給每個人 | 唯一能觸達他們的通道是 email，而且已經有一條（共識會議提醒信） | 提醒仍然寄，但**寄給鍵入者本人**、沿用同一條通道，並且是負責人決定要不要寄 |
+| QC flag 由被指派人認領／豁免 | 他們看不到 flag | flag 路由的用途是**告訴負責人該找誰**；認領與豁免是負責人的動作 |
+| 角色分五級控制各自能做什麼 | 只有一個人操作 | 角色模型保留在程式裡但實務上只用 `manager`；magic link 是負責人自己的登入方式（比共用密碼好：不用記密碼、稽核記真名） |
+
+**不變的部分**：問題1（進度管理）與問題3（欄位分工）的解答完全不受影響——它們本來就是算給負責人看的。問題2（交接斷鏈）的**偵測**不受影響（狀態機照樣算得出「這件事現在可以動工了、已經卡了 12 天」）；改變的是**送達方式**：從「系統通知當事人」變成「負責人看見後決定要不要催，系統幫他把信寄出去」。
+
 ---
 
 ## 2. 設計總覽
@@ -77,15 +97,14 @@ flowchart LR
         DIFF[快照差異比較]
         EVT[(work_event<br/>交接事件流)]
     end
-    subgraph VIEWS["視圖（全部從矩陣+事件推導）"]
-        ME["/me 我的工作"]
+    subgraph VIEWS["負責人的視圖（全部從矩陣+事件推導）"]
         OWN["/owners 負責人進度"]
         INC["/incomplete 未完成清單"]
         PAT["/patients 病人進度"]
         HEAT["/heatmap 熱力圖"]
         QC["/qc 品質管制"]
-        NOTIF[通知：站內 + 每日 digest]
     end
+    NOTIF["外寄提醒信<br/>（負責人核可後寄給鍵入者）"]
     RC -->|record/log/user/metadata export| SNAP
     SCR -->|/api/screening/upload 契約不變| SBLOB[Screening Blob<br/>screening/YYYY-MM/]
     SBLOB -->|"月流程：號段保留→預覽→匯入<br/>（manager，§10）"| RC
@@ -95,7 +114,9 @@ flowchart LR
     MATRIX --> DIFF
     DIFF --> EVT
     MATRIX --> VIEWS
-    EVT --> NOTIF
+    EVT --> VIEWS
+    VIEWS -->|負責人決定要催誰| NOTIF
+    NOTIF -->|email| PPL[鍵入者信箱<br/>不登入本系統]
     VIEWS -->|深連結 DataEntry| RC
 ```
 
@@ -104,7 +125,7 @@ flowchart LR
 | 儲存 | 放什麼 | 理由 |
 |---|---|---|
 | REDCap | 全部臨床資料（不變） | 唯一資料來源 |
-| Postgres（Vercel/Neon） | person、assignment_rule、work_event、qc_flag、notification、audit_log、batch、study_id_reservation、screening_case_link、etiology_meeting、report_delivery、login_token、person_page_state、catalog_version | 需要交易、唯一性約束、範圍查詢、append-only 歷史 |
+| Postgres（Vercel/Neon） | person、assignment_rule、work_event、qc_flag、outbound_mail、audit_log、batch、study_id_reservation、screening_case_link、etiology_meeting、report_delivery、login_token、catalog_version | 需要交易、唯一性約束、範圍查詢、append-only 歷史 |
 | Redis | catalog（現行版）、metadata cache、matrix cache、snapshot 指標 | 熱讀、小、現有基礎設施 |
 | Vercel Blob | 快照原始檔、catalog 歷史版本、scraper 每日檔（契約不變） | 大檔、不可變歷史 |
 
@@ -127,7 +148,7 @@ CREATE TABLE person (
   email            citext UNIQUE NOT NULL, -- 由 REDCap user export 的 email 種入（現行程式在 api/owners/route.ts:18-21 把它丟掉了）
   roles            text[] NOT NULL,      -- ⊆ {manager, doctor, abstractor, labeler, viewer}
   broadcast_opt_out boolean NOT NULL DEFAULT false, -- 取代寫死的「陳雲昶」字串排除（etiology/page.tsx:167）
-  notify_pref      text NOT NULL DEFAULT 'digest',  -- digest | off
+  notify_pref      text NOT NULL DEFAULT 'digest',  -- v1.1：只剩「會不會收到催辦信」的意思；'off' = 不寄，其餘皆寄
   active           boolean NOT NULL DEFAULT true,
   created_at       timestamptz NOT NULL DEFAULT now()
 );
@@ -140,8 +161,9 @@ CREATE TABLE person (
 
 - `POST /api/auth/request-link {email}`：email 屬於 active person 才寄出 15 分鐘一次性簽章連結（HMAC-SHA256，新增環境變數 `SESSION_SECRET`；沿用既有 nodemailer/Gmail 通道）。永遠回 204（防帳號枚舉）。**一次性的實作機制**：token 含 `jti`，Postgres `login_token (jti PRIMARY KEY, person_id, expires_at, used_at)`——callback 時 `used_at IS NULL` 才接受並標記已用（純簽章無法防 15 分鐘內重放）。
 - `GET /api/auth/callback?token=`：設 `session` cookie = JWT `{personId, roles, exp 30d}`，HttpOnly、SameSite=Lax。
-- `src/proxy.ts`（**Next 16 是 proxy 不是 middleware**——實作前必讀 `node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md`）驗證 JWT；**遷移期同時接受舊 user_token/admin_token cookie**，對映到合成人員 `legacy-shared`，第一天什麼都不壞。
-- 全員登入過一次後，設 `LEGACY_AUTH=off` 並刪除 DJB2 雜湊路徑、無效的 OTP 殘骸（`use-admin-auth.ts:75-116`）、以及散落 5 處的 inline admin 檢查——驗證邏輯只活在 `src/lib/session.ts` 一個模組。
+- `src/proxy.ts`（**Next 16 是 proxy 不是 middleware**——實作前必讀 `node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md`）驗證簽章；**遷移期同時接受舊 user_token/admin_token cookie**，對映到合成人員 `legacy-shared`，第一天什麼都不壞。
+- **v1.1**：magic link 是**負責人自己**的登入方式，不是要推給十幾個人的東西（§1.5）。它相對共用密碼的好處有兩個：不用記密碼，以及稽核列記的是真名而不是 `legacy-shared-admin`。因此 `LEGACY_AUTH=off` 不是「等全員上車」的里程碑，而是負責人自己覺得可以退役共用密碼時的一個開關。
+- 散落 5 處的 inline admin 檢查已收斂到 `requireRole()` 一個模組（Phase 1 完成）；DJB2 雜湊路徑與無效的 OTP 殘骸（`use-admin-auth.ts:75-116`）在 `LEGACY_AUTH=off` 之後即可刪除。
 - 機器身分不變：`SCREENING_API_TOKEN`（scraper）、`REPORT_API_TOKEN`（PA 週報）維持 Bearer token 並在 proxy matcher 豁免。
 
 ### 3.3 角色權限
@@ -149,10 +171,12 @@ CREATE TABLE person (
 | 角色 | 權限 |
 |---|---|
 | viewer | 讀所有儀表板 |
-| abstractor / doctor / labeler | viewer + 操作自己的佇列、RSVP、認領/回應自己的 QC flag |
+| abstractor / doctor / labeler | viewer + RSVP |
 | manager | 全部：catalog/規則/人員/批次、screening 判定、etiology_final 回寫、QC 豁免與批次修正 |
 
-每個 mutating API route 以單一 helper `requireRole(req, 'manager')` 伺服器端檢查。
+每個 mutating API route 以單一 helper `requireRole('manager')` 伺服器端檢查。
+
+**v1.1**：實務上只有 `manager` 在用（§1.5）。角色模型保留有兩個理由——它已經實作完成且有測試，而且它讓「有 REDCap 帳號」與「能對 REDCap 回寫」是兩件事，這在只有一個人操作時依然是對的預設。`person.roles` 的其餘四級目前是未使用的容量，不是待完成的工作。
 
 ### 3.4 audit_log（全稽核）
 
@@ -240,7 +264,7 @@ CREATE TABLE audit_log (
 
 > **對正式 schema 校正過（2026-08）**：`ntuh_exam_holtertreadmill` 已移除——REDCap 沒有這個 instrument，其 `_complete` 對全部 7,169 筆記錄皆為空，該表永遠停在 0/1000；Holter 與 treadmill 實際上是 `ntuh_nhi_examcheck` 的兩個 radio 欄位。同時納入 REDCap 有但先前未追蹤的三個 instrument：`ntuh_nhi_ed_vital`、`ntuh_nhi_postarrest_vital`、`ntuh_exam_ct`。
 
-單元可加 `hidden: true` 旗標（取代現行 hiddenForms）：隱藏單元不出現在熱力圖欄、/me 佇列與任何分母，但 `/api/state/matrix?includeHidden=1` 仍可取得。
+單元可加 `hidden: true` 旗標（取代現行 hiddenForms，見 README 的「尚未開始鍵入的表單」）：隱藏單元不出現在熱力圖欄、佇列與任何分母，但 `/api/state/matrix?includeHidden=1` 仍可取得。
 
 | unitId | kind | redcapForm | 來源 |
 |---|---|---|---|
@@ -381,28 +405,68 @@ CREATE INDEX ON work_event (event_type, ts);
 
 ---
 
-## 7. 通知模型
+## 7. 提醒模型（v1.1 重寫）
 
-原則：**佇列是真相**（即時推導、不會漏）；通知是其上的增量；email 以每日 digest 為主，避免轟炸十幾位同仁。
+v1.0 這一節設計的是「站內鈴鐺 + 每人每日 digest」。**沒有收件者**——鍵入者不登入這個系統（§1.5）。整節依實際使用模型重寫。
+
+原則：**佇列是真相**（即時推導、不會漏，而且只要負責人打開頁面就看得到）；**email 是唯一能觸達鍵入者的通道**，因此每一封都是負責人有意識寄出的，不是系統自己決定的。
+
+### 7.1 觸達鍵入者的唯一形狀：email
+
+系統**不會**自動對鍵入者發信。所有外寄提醒都經過負責人，只是負責人不必自己寫信：
+
+| 情境 | 觸發者 | 內容 |
+|---|---|---|
+| 共識會議提醒 | 負責人在 `/etiology` 按下（**現行流程原樣保留**，含簽章 RSVP 連結） | 該 labeler 未判讀的 studyId 清單 + 會議時間 + RSVP |
+| 單人催辦 | 負責人在 `/owners` 任一列按「提醒」 | 該人目前 ready / awaiting-verify 的清單、最老幾天、每筆 REDCap 深連結 |
+| 批次到期 | 負責人在批次頁按「通知相關人」 | 該批次剩餘工作與到期日 |
+
+三者共用同一個信件產生器與同一條 Gmail/nodemailer 通道。群發的排除對象由 `person.broadcast_opt_out` 決定（取代寫死的姓名字串）。
+
+**為什麼不自動寄**：自動化的收益是「不必記得催」，成本是收件者開始忽略這個寄件人。在只有負責人能判斷「這個人這週在開刀房、不用催」的情況下，成本大於收益。系統負責讓「該催誰」一眼可見，按不按由人決定。
+
+### 7.2 負責人怎麼知道該催誰：不是通知，是視圖
+
+取代站內通知的是三個**每次打開都重新推導**的訊號，不需要已讀狀態、不會漏、不需要基礎設施：
+
+- **新交接**：`/owners` 與 `/incomplete` 標出「最近一次快照才變成 ready」的項目（由 `work_event` 推導，預設看 7 天內）。這就是 v1.0 想用 `handoff_ready` 通知表達的事，只是改成一個永遠正確的篩選條件而不是一列一列的未讀記錄。
+- **aging**：`oldestReadyDays` 讓停滯自己浮出來（§9.1）。通知會被無視，排序不會。
+- **停滯 × 落後 兩軸**：`velocity_14d == 0` 與成績正交（§9.1），一眼分出「落後但有在做」與「落後且停工」。
+
+### 7.3 需要主動打斷負責人的事：只有一種
+
+負責人也不是隨時盯著畫面。**唯一值得主動寄信給負責人自己的，是「系統本身沒在運作」**——因為這種事不會出現在任何佇列裡（沒有資料，也就沒有落後的項目）：
+
+- **`scan_missing`**：某院區當日 scraper 檔案在期望掃描時間（09:00）後 N 小時（預設 6，可設定）仍未上傳 → 寄給負責人。補救仍是院內手動重跑，但**不再靠有人剛好看到徽章**。
+- **快照失敗**：連續兩次快照 cron 失敗 → 寄給負責人。狀態矩陣停止更新時，畫面看起來和「大家都沒進度」一模一樣，這是最危險的失效模式。
+
+兩者都以「事件 × 日」去重，一天最多一封。
+
+### 7.4 `outbound_mail`：寄了什麼、寄給誰、寄出去沒有
+
+v1.0 的 `notification` 表（含 `read_at` 收件匣語意）改為單純的外寄流水帳：
 
 ```sql
-CREATE TABLE notification (
-  id         bigserial PRIMARY KEY,
-  person_id  uuid NOT NULL REFERENCES person,
-  kind       text NOT NULL,  -- handoff_ready | awaiting_verify | flag_routed | assignment_changed | nudge | batch_due | meeting | scan_missing
-  payload    jsonb NOT NULL, -- {studyIds, unitId, cause, link}
-  created_at timestamptz NOT NULL DEFAULT now(),
-  read_at    timestamptz,
-  emailed_at timestamptz     -- 寄出時間，/admin 可見（嫁接：通知遞送狀態可視）
+CREATE TABLE outbound_mail (
+  id            bigserial PRIMARY KEY,
+  to_person_id  uuid REFERENCES person,     -- 寄給負責人自己時為 NULL
+  to_email      text NOT NULL,              -- 寄出當下的實際位址（person 之後改 email 也不影響歷史）
+  kind          text NOT NULL,              -- meeting_reminder | nudge | batch_due | scan_missing | snapshot_failed | login_link
+  payload       jsonb NOT NULL,             -- {studyIds, unitId, meetingDate, …}
+  requested_by  uuid REFERENCES person,     -- 按下按鈕的人；系統自動寄出時為 NULL
+  sent_at       timestamptz,                -- NULL = 送出失敗
+  error         text,
+  created_at    timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ON notification (person_id, read_at);
+CREATE INDEX ON outbound_mail (to_person_id, created_at DESC);
+CREATE INDEX ON outbound_mail (kind, created_at DESC);
 ```
 
-- **站內（即時、自動）**：快照 diff cron 與 mutating routes 建立；header 鈴鐺 + `/me` 頂部「新交接」區。kind 明細：`handoff_ready`/`awaiting_verify`/`flag_routed` 由 diff cron 產生；`assignment_changed` 由規則異動產生；`nudge` 由提醒鈕；`batch_due` 由 digest cron 於批次 due_date 前 7 天與當日發給該批次單元被指派人；`meeting` 為 §11 即時會議提醒 email 的站內鏡像（供鈴鐺顯示）；`scan_missing` 見下。
-- **Email（digest、自動）**：每日 08:30 Asia/Taipei（vercel.json cron `30 0 * * *`，注意 UTC 換算）；只寄給有未讀通知或 readyCount>0 的人；依 kind 彙總 + 連回 `/me`；`notify_pref='off'` 可退訂。沿用 Gmail/nodemailer。**按日按人彙總、絕不逐病人寄信**（防通知疲勞；通知被無視時 /me 佇列與 /owners 的 aging 仍然可見——系統不靠通知才正確）。
-- **Email（即時，僅三種）**：(1) etiology 共識會議提醒——現行手動逐人/群發流程**原樣保留**（含簽章 RSVP 連結），群發排除改由 `person.broadcast_opt_out` 驅動，提醒歷史改為每人每會議記錄（取代單一全域 timestamp）；(2) manager 在 /owners 任一列的手動「提醒」鈕（通知 + 即時 email，入稽核）；(3) magic link 登入信。
-- **刻意維持手動**：screening 每日人工判定、召開共識會議的決定、批次建立、任何 REDCap 回寫——系統負責呈現與路由，人負責決定。
-- **新增 `scan_missing`**（修補共同盲點：scraper 健康度只有徽章沒有警報）：某院區當日檔案在期望掃描時間（09:00）後 N 小時（預設 6，可設定）仍未上傳 → 通知 manager（未來可加 scraper 操作者 person）。補救仍是院內手動重跑，但**不再靠有人剛好看到徽章**。
+這張表回答三個現行系統答不出來的問題：**這個月催過他幾次**（避免同一週催兩次）、**上次提醒信到底寄出去了沒有**（現行只有一個全域 `reminderSentAt` timestamp，寄失敗看不出來）、以及**這個 labeler 的提醒歷史**（取代單一全域時間戳）。`/admin` 直接列出它。
+
+### 7.5 刻意維持手動
+
+screening 每日人工判定、召開共識會議的決定、批次建立、任何 REDCap 回寫——系統負責呈現與路由，人負責決定。這一條在 v1.1 反而更強：**外寄提醒也加入這個清單**。
 
 ---
 
@@ -428,16 +492,18 @@ CREATE TABLE qc_flag (
 ```
 
 生命週期：每次快照跑 QC evaluator——
-- check 命中：upsert（新 → `open` + `flag_opened` 事件 + 通知被指派人；既有 → 更新 last_seen_at；**若 `value_hash` 變了而狀態是 `waived` → 自動 REOPEN**——豁免一個確實急救很久的 E1 個案會一直有效，直到底層資料真的改變）。
+- check 命中：upsert（新 → `open` + `flag_opened` 事件；既有 → 更新 last_seen_at；**若 `value_hash` 變了而狀態是 `waived` → 自動 REOPEN**——豁免一個確實急救很久的 E1 個案會一直有效，直到底層資料真的改變）。
 - check 不再命中而 flag 仍 open → `resolved` + `flag_resolved` 事件（自動關閉，零人工記帳）。
 - `acknowledged` =「看到了、會修」（取代一次 reload 就消失的 client-side lastVisited）。
-- `waive` 需 manager 或被指派人 + 必填理由，入稽核。
+- `waive` 需 manager + 必填理由，入稽核。
+
+**v1.1**：`assignee_person_ids` 保留，但它的用途是**告訴負責人該找誰**（以及催辦信要寄給誰），不是給被指派人自己認領——他們看不到 `/qc`（§1.5）。acknowledge 與 waive 都是負責人的動作。
 
 ### 8.2 路由
 
 catalog 的每條 check 定義增加 `responsibleUnits`（有序 unit id 清單；主要責任在前）。**以單元（不是 raw instrument）作路由鍵**，舊的 virtual↔real 名稱錯配消失：A1 路由到 `[core.assistant, outcome.assistant]`。**跨表 A 系列 check 的 UI 同時呈現兩邊的深連結**（修正「只連到問題的一半」）。
 
-**行為類 check（F1/F2）不入 `qc_flag` 表**（該表以 `checkId:studyId` 為指紋、無 person 鍵）：F1/F2 為**短暫值**——每次快照重算、只呈現在 /owners（不混入 /qc 記錄級清單），不持久化、無生命週期；對 manager 的通知走每日 digest（以「person × 日」為去重鍵），不逐快照轟炸。
+**行為類 check（F1/F2）不入 `qc_flag` 表**（該表以 `checkId:studyId` 為指紋、無 person 鍵）：F1/F2 為**短暫值**——每次快照重算、只呈現在 /owners（不混入 /qc 記錄級清單），不持久化、無生命週期。v1.1：不寄信，只在 /owners 顯示——它們是「這個人最近的鍵入行為看起來不對勁」的提示，該不該追是負責人看了才知道的事。
 
 ### 8.3 修正與門檻
 
@@ -473,7 +539,9 @@ catalog 的每條 check 定義增加 `responsibleUnits`（有序 unit id 清單�
 
 **Credit 歸屬**：共享/pool 單元的完成數歸給 REDCap log 中最後存檔該 record+form 的實際操作者（log 以既有但未用的 `formParsed` 依表單 join，`transform.ts:163-174`）；無法歸屬的誠實顯示「無法歸屬」而非默默算錯。
 
-**被擋住反向分組（嫁接自最小演進方案）**：/owners 的鑽取頁提供「**依擋住者分組**」視圖——「30 筆被擋住：22 筆等王OO 的 sur_icu、8 筆等 etiology 共識」。這是管理者「該去催誰」最快的一張視圖。
+**被擋住反向分組（嫁接自最小演進方案）**：/owners 的鑽取頁提供「**依擋住者分組**」視圖——「30 筆被擋住：22 筆等王OO 的 sur_icu、8 筆等 etiology 共識」。這是負責人「該去催誰」最快的一張視圖，也是「提醒」鈕最該出現的位置（§7.1）。
+
+**v1.1：每一列都要看得到「上次催他是什麼時候」**——由 `outbound_mail` join 得出（§7.4）。沒有這一欄，同一週催兩次或整個月忘記催都不會被察覺。
 
 ### 9.2 每病人（新增 /patients、/patients/[studyId]）
 
@@ -497,7 +565,7 @@ CREATE TABLE batch (
 );
 ```
 
-TargetProgress 卡片照舊（✓完成 / 缺 N 筆 + 深連結），分母改用適用性。現行兩個 targetIds 自動遷移為 slug `basic` / `exam` 兩個批次。批次有 `due_date` 時，digest cron 於到期前 7 天與當日發 `batch_due` 通知給該批次單元的被指派人。
+TargetProgress 卡片照舊（✓完成 / 缺 N 筆 + 深連結），分母改用適用性。現行兩個 targetIds 自動遷移為 slug `basic` / `exam` 兩個批次。批次有 `due_date` 時，到期前 7 天與當日在 `/dashboard` 與 `/owners` 標示（v1.1：不自動發信；要不要通知相關人由負責人按下 §7.1 的按鈕決定）。
 
 ### 9.4 週報契約
 
@@ -515,7 +583,7 @@ CREATE TABLE report_delivery (
 
 ### 9.5 分享即連結
 
-所有篩選（person/hospital/unit/state/batch）都是 **URL query 參數**（`/me?person=…&state=ready`）——「這是你的清單」變成一條可貼的連結（修正 client context 篩選不可分享）。
+所有篩選（person/hospital/unit/state/batch）都是 **URL query 參數**（`/incomplete?person=…&state=ready`）——修正 client context 篩選不可分享。v1.1：這條連結的用途不是寄給鍵入者（他們沒有帳號、打不開），而是**負責人自己在裝置之間、或在對話中引用一個特定切面**；要給鍵入者的清單以信件內文送出（§7.1），信裡放的是 REDCap 深連結。
 
 ---
 
@@ -602,20 +670,21 @@ CREATE TABLE etiology_meeting (
 | 路由 | 狀態 | 內容 |
 |---|---|---|
 | `/` 首頁 | 不變 | landing tiles + 登入狀態 chip |
-| `/login` | 演進 | magic link 申請表單；Phase 1 期間保留舊共享密碼欄位 |
-| **`/me` 我的工作** | **新增** | 個人佇列：新交接（未讀通知）→ 可開始（ready，依單元分組，每列 studyId/院區/單元/天數/REDCap 深連結）→ 待確認（醫師的 entered_awaiting_verify 收件匣）→ 品管（我的 open flags）→ 被擋住（收合、附原因、可見不可動工）。URL 可帶參數，manager 可寄「你的清單」連結 |
+| **`/admin/people` 人員登記** | ✅ **已完成** | REDCap 使用者匯入 + labeler 代碼連結 + 角色。用途是**對照表**（REDCap 帳號 ↔ labeler 代碼 ↔ email），不是為了讓這些人登入 |
+| `/login` | ✅ 完成 | magic link 申請表單 + 舊共享密碼欄位並存 |
+| ~~`/me` 我的工作~~ | **v1.1 取消** | 沒有收件者（§1.5）。它要提供的三件事改為 `/incomplete` 的篩選：`?person=…&state=ready`（可開始）、`&state=entered_awaiting_verify`（待確認）、`&blocked=1`（被擋住、附原因）。「新交接」不是未讀清單而是 `?since=7d` 的篩選（§7.2） |
 | `/dashboard` 總覽 | 演進 | 保留 StatCards + TargetProgress + 表單長條圖；新增「完整完成病人數」與「排除判定待完成」計數；**院區篩選套用到所有 widget**（修正長條圖不理會院區篩選）；篩選入 URL |
 | `/owners` 負責人進度 | 演進 | §9.1 的每人指標表 + 提醒鈕；未指派 bucket 一鍵開規則表單；鑽取頁含「依阻擋者分組」 |
-| `/incomplete` 未完成清單 | 演進 | 全域佇列瀏覽器（state/unit/person/hospital/batch/flagged 篩選、URL 參數）；預設視圖模擬今日清單（state ∈ ready\|in_progress）維持連續感；last-visited 改為伺服器端逐人保存（Postgres `person_page_state (person_id, page, state jsonb, updated_at, PRIMARY KEY(person_id,page))`） |
+| `/incomplete` 未完成清單 | 演進（**v1.1 吸收 `/me` 的職責**） | 全域佇列瀏覽器（state/unit/person/hospital/batch/flagged/since 篩選、URL 參數）；預設視圖模擬今日清單（state ∈ ready\|in_progress）維持連續感；每列一顆「提醒這個人」（§7.1）。last-visited 存負責人一個人的，`localStorage` 即可——v1.0 的 `person_page_state` 表是為了多人而設計的，取消 |
 | **`/patients`** | **新增** | 病人層級進度清單（studyId、院區、phase chip、適用完成 %、open flags） |
 | **`/patients/[studyId]`** | **新增** | 單一病人 34 單元 pipeline（§4.2 種子表；隱藏單元不列）+ 事件時間軸 + 每單元深連結 |
 | `/etiology` | 演進 | 原有全部保留；新增「需手動處理」分頁、全域欠債視圖、會議歷史、未知代碼警示 |
-| `/qc` 品質管制 | 演進 | 13 條記錄級 check + 新增 A0（F1/F2 行為類**移列 /owners**，見 §8.2）；新增 狀態/負責人/首次偵測 欄與 認領/豁免 動作、跨表雙邊深連結、B1 dry-run modal |
+| `/qc` 品質管制 | 演進 | 13 條記錄級 check + 新增 A0（F1/F2 行為類**移列 /owners**，見 §8.2）；新增 狀態/該找誰/首次偵測 欄與 標記已看過/豁免 動作（皆為負責人的動作）、跨表雙邊深連結、B1 dry-run modal |
 | `/heatmap` 熱力圖 | 演進 | 6 態 + flagged 共 7 色（灰 N/A、斜紋 blocked、**淺灰底描邊** ready（純白在淺色模式與底色不可分）、黃 in-progress、藍 awaiting-verify、綠 complete、紅圈 flagged；深淺色模式各自指定 token）；排除記錄過濾；study id 數值排序（修正字串排序）；欄序取 catalog sortOrder |
 | `/productivity` 鍵入進度 | 演進 | 以 redcap_username + formParsed 逐表歸屬；誠實時間窗（本週=7天、本月=日曆月）；閒置期顯示零而非消失；turnaround 指標；成績新算法 |
 | `/screening` | 演進 | 保留每日審核 UI（遮名、確認/排除/覆寫）+ 判定者記名 + Manual_Review bucket + 月覆蓋條 + 待審徽章 |
 | `/screening/monthly` | 演進 | 保留號段 → 預覽 → API 匯入（或 CSV fallback）→ 逐案已匯入狀態 → 確認已匯入鎖定 |
-| `/admin` 管理者 | 演進（自 /assign，留 redirect） | 分頁：人員 / 單元與規則（catalog 編輯器 + 驗證 + diff 預覽 + 版本歷史；規則表 + 影響預覽）/ 批次目標 / 設定（門檻、隱藏單元）；REDCap metadata 漂移橫幅（含「接受改名」一鍵解決，嫁接自設定驅動方案） |
+| `/admin` 管理者 | 演進（自 /assign，留 redirect） | 分頁：人員（✅ 已完成 `/admin/people`）/ 單元與規則（catalog 編輯器 + 驗證 + diff 預覽 + 版本歷史；規則表 + 影響預覽）/ 批次目標 / 設定（門檻、隱藏單元）/ **寄信紀錄**（`outbound_mail`，§7.4）；REDCap metadata 漂移橫幅（含「接受改名」一鍵解決，嫁接自設定驅動方案） |
 | **`/admin/audit`** | **新增** | 稽核檢視器（manager only） |
 | **`/admin/parity`** | **新增（常駐）** | 新舊推導對照報告（嫁接自設定驅動方案）：舊 hardcoded 邏輯 vs 新 catalog 推導的差異清單。**遷移驗證用，且 cutover 後永久保留**——之後任何 catalog 編輯或 REDCap 升級都能先看 parity |
 | 移除 | 無 | 側欄分類法零刪除 |
@@ -627,10 +696,10 @@ CREATE TABLE etiology_meeting (
 ```
 # Auth
 POST /api/auth/request-link        公開；{email} → 204（永遠）
-GET  /api/auth/callback?token=     公開；設 session JWT、導向 /me
+GET  /api/auth/callback?token=     公開；設 session cookie、導向 next（預設 /）
 POST /api/auth/logout              session
 
-# 狀態與事件（餵 /me /incomplete /heatmap /patients 的唯一讀取 API）
+# 狀態與事件（餵 /incomplete /heatmap /patients /owners 的唯一讀取 API）
 GET  /api/state/matrix?snapshot=latest&person=&unit=&state=&hospital=&batch=
                                    session；[{studyId, unitId, state, blockReason?, flagged, assigneePersonIds}] + snapshot ts
 POST /api/state/refresh            session；全域限流 1/5min；觸發新快照+diff（取代 per-user noCache 全站快取轟炸）
@@ -644,14 +713,13 @@ POST /api/rules/[id]/supersede     manager
 GET/POST/PATCH /api/people         manager（GET self 開放）；POST /api/people/import-redcap-users
 GET/POST/PATCH /api/batches        manager
 
-# 通知
-GET  /api/notifications            session（self）
-POST /api/notifications/read       session（self）
-POST /api/nudge                    manager；{personId, message?} → 通知+即時 email+稽核
+# 外寄提醒（v1.1 重寫：沒有站內收件匣，只有寄出去的信）
+POST /api/nudge                    manager；{personId, unitIds?, message?} → 寄信給該鍵入者 + outbound_mail + 稽核
+GET  /api/outbound-mail?person=&kind=  manager；寄信歷史（「這個月催過他幾次」「上次那封寄出去了沒有」）
 
 # QC
 GET  /api/qc/flags?status=&assignee=&check=          session
-POST /api/qc/flags/[fingerprint]   {action: acknowledge|waive|reopen, reason?}；waive 限 manager/被指派人；稽核
+POST /api/qc/flags/[fingerprint]   manager；{action: acknowledge|waive|reopen, reason?}；waive 必填理由；稽核
 GET  /api/qc/fixables              session
 POST /api/qc/fix/[checkId]         manager only（修正現行無驗證）；?dryRun=1 → {diff, confirmHash}；執行必帶 confirmHash
 
@@ -671,8 +739,8 @@ GET  /api/rsvp                     公開簽章連結；原樣保留
 GET  /api/report/weekly            Bearer REPORT_API_TOKEN；契約保留、僅加欄位；每次拉取寫 report_delivery
 
 # Cron（CRON_SECRET header）
-GET  /api/cron/snapshot            每小時：快照+推導+diff+QC eval
-GET  /api/cron/digest              每日 08:30 台北
+GET  /api/cron/snapshot            每小時：快照+推導+diff+QC eval；連兩次失敗寄信給負責人（§7.3）
+GET  /api/cron/watchdog            每日：scan_missing 檢查（§7.3）。v1.0 的 digest cron 取消——沒有收件者
 GET  /api/cron/metadata            每日：data dictionary + project info + user export 同步
 
 # proxy 豁免清單（src/proxy.ts，Next 16）
@@ -714,14 +782,16 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 | **0 打地基** | 佈建 Vercel Postgres（Neon）；migrations 建 person、audit_log；新增 CRON_SECRET、SESSION_SECRET；REDCap export 改 JSON format（藏在現有 client 介面後）；回寫改逐列解析；**對所有仍在的 Redis/Blob JSON 寫入統一加樂觀鎖（version 欄 + expectedVersion + 409，約 10 行套路）**——在遷移完成前先關閉 meeting-settings/labelers 的丟寫競態。**部署目標決策**：本設計以 Vercel 為唯一部署目標（Postgres/cron/Blob/magic-link 皆依賴之）；repo 內的 docker-compose.yml 與 Dockerfile 現況已缺 USER_PASSWORD/REDIS_URL/BLOB_READ_WRITE_TOKEN 而半殘——**Phase 0 移除兩檔**並在 README 註明（若院方未來要求自架，屆時另立設計） | Dashboard 行為完全不變 |
 | **1 身分與稽核** | person 登記 + REDCap user 匯入 + labeler 連結 UI；magic link 與舊共享密碼**並存**；所有 mutating route 加 requireRole + audit；screening 判定與 etiology 回寫記名 | 全員登入過一次後設 LEGACY_AUTH=off、刪 DJB2 |
 | **2 宣告式 catalog** | 版本化 catalog 儲存 + 驗證器 + /admin 編輯器；種子腳本把 forms.ts/VIRTUAL_FORMS/必填清單/適用規則/QC 參數 1:1 轉入；transform 與 QC 改讀 catalog；把 CORE_ASSISTANT_NON_ER 漂移呈給 G03360 裁決 | 畫面 pixel 相同；設定可編輯；回滾 = 由程式常數重種 |
-| **3 狀態引擎（唯讀）** | 每小時快照 cron；deriveState（6 基礎態 + flagged）；matrix cache；`GET /api/state/matrix`；/heatmap 與 /incomplete 切換到狀態渲染（N/A 灰、blocked 斜紋——管理者的第一個可見勝利）；/patients 兩頁；排除判定待完成 bucket。**Phase 3–4 的過渡指派解析**：assignment_rule 到 Phase 5 才有——此前 `assigneePersonIds` 與事件路由一律由**舊 owner-store map（unit 的 legacy form name → redcap_username）經 person.redcap_username join 出單一 person**；無對映者 routed_person_ids 為空、僅入 manager digest。Phase 5 換成規則解析，**介面不變** | 尚無任何東西依賴事件；舊 completion API 續供未切換頁面；**新舊完成語意對照**（parity 頁用）：`complete`≡舊 2；助理單元 `entered_awaiting_verify`≡舊 2；`ready/blocked/in_progress(_complete=0)`≡舊 0；`in_progress(_complete=1)`≡舊 1；`not_applicable`≡舊的「跳過不產列」——依此對照，Phase 3 數字必須與現狀一致 |
-| **4 事件、/me、通知** | 快照 diff 發 work_event；/me；notification 表 + 鈴鐺 + 每日 digest cron；提醒鈕。**問題2 至此端到端解決**（以 Phase 3 的過渡指派解析路由；Phase 5 後自動改走規則） | email 只有 digest；與團隊觀察一週 |
-| **5 指派規則 v2 + 進度修正** | owner-store.assignments → 每單元一條全域 pool 規則（第一天語意相同）；開放院區/號段/多人規則 + 影響預覽；targetIds → 批次；/owners、/productivity 切 person-id join、操作者歸屬、新成績、URL 篩選；週報加欄位。**雙軌鏡寫（嫁接自人員當責方案）**：新規則每次異動同步把「最近似單一負責人投影」寫回舊 Redis owner-store blob——transform.ts、/owners、週報**未切換前照常運作**，逐頁切換、零大爆炸 | /admin/parity 新舊數字並跑兩週後，退役 Redis owner-store |
-| **6 QC 生命週期與路由** | qc_flag 持久化、快照 eval upsert/自動解除、responsibleUnits 路由、雙邊深連結、認領/豁免、dry-run+confirmHash、fix route 加驗證；A0 逆序查核上線；F1/F2 語意修正 | 獨立上線；首次 eval 以乾淨 open 態起算 |
+| **3 狀態引擎（唯讀）** | 每小時快照 cron；deriveState（6 基礎態 + flagged）；matrix cache；`GET /api/state/matrix`；/heatmap 與 /incomplete 切換到狀態渲染（N/A 灰、blocked 斜紋——負責人的第一個可見勝利）；/patients 兩頁；排除判定待完成 bucket。**Phase 3–4 的過渡指派解析**：assignment_rule 到 Phase 5 才有——此前 `assigneePersonIds` 與事件路由一律由**舊 owner-store map（unit 的 legacy form name → redcap_username）經 person.redcap_username join 出單一 person**；無對映者 routed_person_ids 為空、僅在 /owners 的「未指派」bucket 顯示（v1.1：沒有 digest 可入）。Phase 5 換成規則解析，**介面不變** | 尚無任何東西依賴事件；舊 completion API 續供未切換頁面；**新舊完成語意對照**（parity 頁用）：`complete`≡舊 2；助理單元 `entered_awaiting_verify`≡舊 2；`ready/blocked/in_progress(_complete=0)`≡舊 0；`in_progress(_complete=1)`≡舊 1；`not_applicable`≡舊的「跳過不產列」——依此對照，Phase 3 數字必須與現狀一致 |
+| **4 事件與催辦（v1.1 重寫）** | 每小時快照 cron；快照 diff 發 `work_event`；`/incomplete` 吸收 `/me` 的三個切面（`?person=&state=&since=`）並每列加「提醒」鈕；`outbound_mail` 表 + `/api/nudge`；watchdog cron（scan_missing、快照連兩次失敗寄給負責人）。**取消**：`/me` 頁、`notification` 表、站內鈴鐺、每日 digest cron——沒有收件者（§1.5）。**問題2 至此端到端解決**：狀態機偵測交接、負責人看見、一鍵把清單寄給該做的人（以 Phase 3 的過渡指派解析路由；Phase 5 後自動改走規則） | 負責人能在一個畫面上答出「今天該催誰」，且催完看得到寄出紀錄 |
+| **5 指派規則 v2 + 進度修正** | owner-store.assignments → 每單元一條全域 pool 規則（第一天語意相同）；開放院區/號段/多人規則 + 影響預覽；targetIds → 批次；/owners、/productivity 切 person-id join、操作者歸屬、新成績、URL 篩選；週報加欄位。**v1.1：這是 `/admin/people` 匯入的回收點**——在此之前 person 表沒有任何讀者，顯示名稱字串比對仍在用。**雙軌鏡寫（嫁接自人員當責方案）**：新規則每次異動同步把「最近似單一負責人投影」寫回舊 Redis owner-store blob——transform.ts、/owners、週報**未切換前照常運作**，逐頁切換、零大爆炸 | /admin/parity 新舊數字並跑兩週後，退役 Redis owner-store |
+| **6 QC 生命週期與路由** | qc_flag 持久化、快照 eval upsert/自動解除、responsibleUnits 路由（v1.1：路由的用途是知道該找誰，認領與豁免都是負責人的動作）、雙邊深連結、dry-run+confirmHash；A0 逆序查核上線；F1/F2 語意修正。**`fix route` 加驗證已於 Phase 1 完成** | 獨立上線；首次 eval 以乾淨 open 態起算 |
 | **7 Screening 強化** | 號段保留 + case link + API 匯入（CSV fallback）+ 已匯入 n/N + 確認鎖定；Manual_Review bucket；月覆蓋條 + scan_missing 通知；ed_date 改 regDate（附開關）；院區代碼表修補 | scraper 契約全程未動 |
 | **8 Etiology 延續** | etiology_meeting 表取代單一 blob（現 blob 遷為 open meeting）；會議歷史、逐人提醒史；需手動處理常駐佇列；全域欠債；投票計數修正 + 未知代碼警示；範圍化快取失效 | 共識數學、投影模式、RSVP、批次上傳逐位元照搬（含 §11 的兩個明示修正） |
 
 **永不中斷**：REDCap 資料輸入、深連結、scraper 上傳契約、PA 週報契約、已寄出信箱裡的 RSVP 連結、側欄分類、以及每個讀取視圖在其自身遷移 phase 內（每頁在單一 phase 內原子切換資料來源）。**計畫可在任何 phase 後無限期暫停，不留半吊子狀態**——P1 單獨解決記名問題、P2 單獨解決問題3、P3+P4 單獨解決問題2、P5 單獨解決問題1。
+
+**進度（2026-08-31）**：Phase 0 ✅、Phase 1 ✅（PR #10、#11 已合併上線）。Phase 2 與 3 的引擎已完成且有測試，但**尚未接上既有頁面**——catalog 編輯器未做、每小時快照 cron 未做、`/heatmap` 與 `/incomplete` 仍讀舊的 `/api/completion`、`/patients` 兩頁未做。因此問題1 與問題2 的機制目前都還沒對負責人可見。
 
 ---
 
@@ -733,12 +803,14 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 | REDCap log 歸屬不完美 | 只用於生產力、永不影響狀態；無法歸屬誠實顯示；遷移前歷史沿用舊制歸屬並標註資料起算日 |
 | 管理者改壞 catalog 設定 | schema+metadata 驗證、強制 dry-run 影響差異、版本歷史一鍵回滾、循環偵測、常駐 /admin/parity |
 | 每小時快照 = 交接延遲上限 ~1h；全量 export 負載 | 會議日手動刷新；gzip；量大時改用 log endpoint 取變更 record id 增量 patch。日粒度的交接流程不需要更快 |
-| 十幾位臨床人員的採用慣性（不看 /me、不點 magic link） | 每日 digest 把佇列推到信箱；/owners 的 awaiting-verify aging 讓停滯幾天內可見；舊共享密碼路徑撐到全員上車；**系統不靠通知才正確——佇列與 aging 永遠在** |
+| ~~十幾位臨床人員的採用慣性~~ **（v1.1 取代）**：鍵入者從不進入系統，所以任何「他們會看到」的設計都是假的 | 唯一的觸達通道是 email，而且每封都由負責人按下（§7.1）——不會有沒人讀的站內通知累積。`outbound_mail` 讓「這個月催過他幾次」變成可查的事實而不是印象 |
+| **（v1.1 新增）單點依賴**：整個催辦迴圈只有一個人。他休假、忙碌或忘記看，系統不會替他動作 | 這是刻意的取捨（§7.1：自動化省下記憶成本，代價是收件者開始忽略寄件人）。緩解在於降低「看一眼」的成本：`/owners` 一個畫面答出該催誰、aging 排序讓最該處理的浮到最上面、`/incomplete?since=7d` 就是這週的新交接。系統唯一會主動打斷他的是「系統自己壞了」（§7.3） |
+| **（v1.1 新增）寄信失敗無聲**：Gmail app password 過期、額度用盡、位址錯誤 | `outbound_mail.sent_at` 為 NULL 即失敗並記 `error`；`/admin` 的寄信紀錄直接列出。現行只有一個全域 `reminderSentAt` timestamp，寄失敗時它照樣被更新 |
 | 事件在首兩次快照前無法回填 | 指標標註起算日；Phase 5 parity 並跑兩週再退役舊數字 |
 | Screening API import 寫壞正式 REDCap | 交易性號段查核現況 max、case link 冪等、逐列驗證、強制預覽、稽核、CSV fallback 保留、確認後鎖定重匯出 |
 | 種入的相依圖含未成文假設 | 只把可證實的邊（verify 配對、sur_icu、trauma、etiology_final）種為 blocking，其餘 soft_order；G03360 在 catalog 編輯器逐步升級 |
-| 通知變噪音被無視 | 逐日逐人彙總、絕不逐病人寄信；notify_pref 可關；佇列本身永遠完整 |
-| Vercel cron 需付費方案或外部觸發 | 既有 PA routine 證明外部排程存在，可打 `/api/cron/*`（CRON_SECRET）；頻率降級只延遲通知、不影響正確性 |
+| 通知變噪音被無視 | v1.1：外寄提醒由負責人逐次決定，本來就不會有排程轟炸；`broadcast_opt_out` 可退出群發；**佇列本身永遠完整——系統不靠信被讀到才正確** |
+| Vercel cron 需付費方案或外部觸發 | 既有 PA routine 證明外部排程存在，可打 `/api/cron/*`（CRON_SECRET）；頻率降級只延遲狀態更新、不影響正確性。v1.1：快照 cron 停擺時畫面看起來和「大家都沒進度」一模一樣，因此連兩次失敗必須寄信給負責人（§7.3） |
 
 ---
 

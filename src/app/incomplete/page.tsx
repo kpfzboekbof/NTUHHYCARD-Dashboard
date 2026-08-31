@@ -179,7 +179,7 @@ function QueueView() {
       const result = await res.json();
       if (!res.ok) setNudgeResult(`寄送失敗：${result.error}`);
       else if (result.empty) setNudgeResult(result.message);
-      else setNudgeResult(`已寄給 ${result.to}（${result.units.map((u: { label: string; ready: number; awaiting: number }) => `${u.label} ${u.ready + u.awaiting} 筆`).join('、')}）`);
+      else setNudgeResult(`已寄給 ${result.to}（共 ${result.total} 筆：${result.units.map((u: { label: string; remaining: number }) => `${u.label} ${u.remaining}`).join('、')}）`);
     } catch {
       setNudgeResult('連線失敗，請再試一次');
     } finally {

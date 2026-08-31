@@ -38,6 +38,7 @@ const OWNED_TABLES = new Set([
   'login_token',
   'work_event',
   'outbound_mail',
+  'batch',
 ]);
 
 const client = new Client(url);

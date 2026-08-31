@@ -17,10 +17,14 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 
 本地開發時，app 狀態（負責人指派、labeler、會議設定）寫在 gitignore 的 `./data/*.json`；部署環境改用 Redis。
 
+管理資料庫（人員身分、稽核記錄）用 Postgres：`npm run migrate` 套用 `migrations/` 底下的 SQL。**這個專案的資料表必須獨立於其他應用程式**——migration runner 會先檢查目標資料庫裡有沒有不屬於本專案的資料表，有就拒絕執行。臨床資料一律留在 REDCap，這個資料庫只放 REDCap 表達不了的管理中繼資料。
+
 ## 環境變數
 
 | 變數 | 用途 |
 |---|---|
+| `OHCA_DATABASE_URL` | 管理資料庫（人員、稽核）的 Neon 連線字串。未設定時退回 `DATABASE_URL`——專屬變數名是為了讓多專案共用的開發環境不會互撞 |
+| `SESSION_SECRET` | 簽發／驗證個人登入 session |
 | `REDCAP_URL`、`REDCAP_TOKEN` | REDCap API（預設 `https://redcap.ntuh.gov.tw/api/`） |
 | `USER_PASSWORD` | 全站登入密碼 |
 | `ADMIN_PASSWORD` | 管理者操作密碼 |

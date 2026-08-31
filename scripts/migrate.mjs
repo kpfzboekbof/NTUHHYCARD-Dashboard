@@ -16,11 +16,14 @@ import { Client } from '@neondatabase/serverless';
 
 const migrationsDir = fileURLToPath(new URL('../migrations/', import.meta.url));
 
-const url = process.env.DATABASE_URL;
+// OHCA_DATABASE_URL first, so a shared development environment can hold
+// several projects' databases without them colliding on one name.
+const url = process.env.OHCA_DATABASE_URL || process.env.DATABASE_URL;
 if (!url) {
-  console.error('DATABASE_URL 未設定');
+  console.error('OHCA_DATABASE_URL / DATABASE_URL 未設定');
   process.exit(1);
 }
+console.log(`target: ${new URL(url).hostname} / ${new URL(url).pathname.slice(1)}`);
 
 /**
  * Tables this project owns. Anything else in `public` means DATABASE_URL is
@@ -46,7 +49,7 @@ try {
   if (foreign.length > 0 && process.argv[2] !== '--allow-shared') {
     console.error('拒絕執行：這個資料庫裡有不屬於本專案的資料表');
     console.error(`  ${foreign.join(', ')}`);
-    console.error('DATABASE_URL 可能指向別的應用程式的資料庫。');
+    console.error('連線字串可能指向別的應用程式的資料庫。');
     console.error('確認無誤要共用，才加上 --allow-shared 重跑。');
     process.exit(1);
   }

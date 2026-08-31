@@ -42,21 +42,27 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 
 因此它們在 `config/forms.ts` 標了 `pendingEntry`，並成為 `hiddenForms` 的**預設值**——只有在管理者從未存過設定時才套用。開始鍵入的那天，到 `/assign` 把勾取消再存檔即可讓它重新出現，不需要改程式或重新部署。表單定義本身一直都在，drift 報告也照常比對。
 
+## 使用模型
+
+**這個 Dashboard 只有一位使用者：資料庫負責人。** 其他同仁在 REDCap 裡鍵入資料，不會登入這個系統。所有頁面都是負責人的監控視圖；要觸達鍵入者只有一條路——寄信（目前是共識會議提醒信）。設計書 §1.5 有完整說明。
+
 ## 登入
 
-兩條路徑並存，正在從左邊走到右邊：
+兩條路徑並存，都是給負責人自己用的：
 
-| | 共用密碼（舊） | Email magic link（新） |
+| | 共用密碼 | Email magic link |
 |---|---|---|
 | 身分 | 沒有——只知道「有人」 | `person` 表裡的一個人 |
-| 權限 | 兩級：使用者／管理者 | `manager` / `doctor` / `abstractor` / `labeler` / `viewer` |
-| 稽核 | 記不到人 | `audit_log` 記 `person.id` |
+| 稽核 | 記成 `legacy-shared-admin` | `audit_log` 記 `person.id`，看得到真名 |
+| 使用 | 記密碼 | 收信點連結 |
 
-個人登入的前置作業：`/admin/people` 按「從 REDCap 匯入」把 REDCap 使用者清單（帳號、姓名、email）帶進 `person`，再逐一設定角色與 labeler 代碼。之後每個人在 `/login` 選「改用 email 登入」收連結即可——連結 15 分鐘有效且只能用一次（`login_token` 表記錄已使用，純簽章擋不住轉寄重放）。
+magic link 的連結 15 分鐘有效且只能用一次——`login_token` 表記錄已使用，純簽章擋不住轉寄重放。要用的話先到 `/admin/people` 按「從 REDCap 匯入」建立自己的 `person` 列並給 `manager` 角色。不想用就繼續用共用密碼，兩者都會一直有效。
 
-全員都以 email 登入過之後，設 `LEGACY_AUTH=off`；共用密碼即失效，`src/lib/auth.ts` 的 DJB2 路徑就可以整個刪掉。
+覺得可以退役共用密碼時設 `LEGACY_AUTH=off`，`src/lib/auth.ts` 的 DJB2 路徑就可以整個刪掉。
 
-伺服器端的權限檢查只有一個進入點：`requireRole()`（`src/lib/auth/identity.ts`）。proxy 只做簽章層級的樂觀檢查，不查資料庫——Next 16 文件明確要求 proxy 不當成完整授權層。
+`/admin/people` 的主要用途其實不是登入，而是**對照表**：REDCap 帳號 ↔ etiology labeler 代碼 ↔ email ↔ 顯示名稱。這是讓 `/owners`、`/productivity` 之後能停止用顯示名稱字串比對人的前提（設計書 Phase 5）。
+
+伺服器端的權限檢查只有一個進入點：`requireRole()`（`src/lib/auth/identity.ts`）。角色模型有五級但實務上只用 `manager`。proxy 只做簽章層級的樂觀檢查，不查資料庫——Next 16 文件明確要求 proxy 不當成完整授權層。
 
 ## 部署
 

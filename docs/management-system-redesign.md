@@ -19,7 +19,7 @@
 - **完成規則**（completion rule，如「必填欄位全填」或 `_complete == '2'`）
 - **相依邊**（dependencies，如 Core 醫師必須等 Core 助理填完）
 
-一個**純函數**把每次 REDCap 快照轉換成「病人 × 工作單元」的**狀態矩陣**（**6 種基礎狀態**：`not_applicable` / `blocked` / `ready` / `in_progress` / `entered_awaiting_verify` / `complete`，外加獨立的 `flagged` 覆蓋層）；比較前後兩次快照的差異就得到**交接事件**（「Outcome 助理填了 sur_icu=1 → 病人 5123 的 Lab ICU 變成 ready → 通知負責人」）。
+一個**純函數**把每次 REDCap 快照轉換成「病人 × 工作單元」的**狀態矩陣**（**6 種基礎狀態**：`not_applicable` / `blocked` / `ready` / `in_progress` / `entered_awaiting_verify` / `complete`，外加獨立的 `flagged` 覆蓋層）；比較前後兩次快照的差異就得到**交接事件**（「Outcome 助理填了 sur_icu=1 → 病人 5123 的 Lab ICU 變成 ready → 浮上負責人的視圖，附一鍵寄信給該做的人」）。
 
 每人／每病人進度、待催辦清單、QC flag 路由、外寄提醒——全部變成同一個矩陣與事件流之上的「視圖」。**REDCap 仍是唯一資料來源與唯一輸入介面；Dashboard 仍是佇列＋深連結；現有側欄的頁面分類全部保留、就地演進。**
 
@@ -328,7 +328,7 @@ CREATE TABLE assignment_rule (
 - **個人 credit 不再來自指派**：來自 REDCap log 的實際操作者（§9）——共享表單終於能正確歸屬。
 - Etiology：labeler 掛在 `etiology.vote` 單元的 pool 規則上；共識門檻移入 catalog `consensusRule: {minVotes: 3, allowSingleDissenter: true, dissenterMajorityMin: 3}`（預設值 = 現行寫死值）。
 - **變更前影響預覽**：存規則前顯示「此變更把 N 個未完成項從 A 改派給 B」（以現行矩陣計算）。
-- **變更即通知**：規則異動自動通知受影響的被指派人（修正現行 /assign 單向無聲指派）。
+- **變更即留痕（v1.1 修正）**：規則異動寫入稽核與 `assigned` 事件，受影響項目在 /owners 標示「本週改派」。不自動寄信——被指派人本來就看不到系統（§1.5），改派對他有意義的時刻是負責人下一次寄清單給他的時候（修正現行 /assign 改完連負責人自己都無從回顧的問題）。
 
 ---
 
@@ -350,7 +350,7 @@ stateDiagram-v2
     entered_awaiting_verify --> complete : 醫師 _complete=2
     in_progress --> complete : _complete=2 / 規則全滿足
     ready --> complete : 無verify單元且規則滿足
-    complete --> in_progress : 回退（regressed 事件，通知雙方）
+    complete --> in_progress : 回退（regressed 事件，浮上視圖）
     note right of entered_awaiting_verify
         新增的「助理已輸入、
         待醫師確認」狀態
@@ -368,7 +368,7 @@ stateDiagram-v2
 3. **完成規則**（依類型）：
    - `complete_field`（一般表單，27 個，見 §4.2 種子表）：`_complete=='2'`→complete；`'1'`→in_progress；`'0'`/缺→ready。Repeat instrument 沿用 MAX 聚合（相容性決策，見 §14 已知限制）。
    - `required_fields`（欄位群組，如 core.assistant / outcome.assistant）：0 欄填→ready；部分→in_progress；**全填**→有下游 verify 單元未完成時為 `entered_awaiting_verify`，否則 complete；配對 verify 單元完成時→complete。**這就是缺失的「助理已輸入、待醫師確認」狀態**；醫師得到明確觸發：core.doctor 被擋到 core.assistant 達 entered_awaiting_verify 才變 ready——**交接是狀態轉移，不是默契**。
-   - `verify`（core.doctor / outcome.doctor）：blocked → 來源 entered 後 ready → `_complete=='1'` in_progress → `'2'` complete。完成後欄位被改或 _complete 回退 → 引擎發 `regressed` 事件通知雙方。**優先權例外（與統計相容的明確決策）**：verify 單元若 `_complete=='2'`，**完成規則優先於相依檢查**——狀態為 `complete` 並由 A0 逆序查核（§6.4）開 flag，而**不是** blocked。醫師先簽核的個案在統計上維持與現制一致（今日算 complete），違規以 flag 呈現而非以狀態懲罰。
+   - `verify`（core.doctor / outcome.doctor）：blocked → 來源 entered 後 ready → `_complete=='1'` in_progress → `'2'` complete。完成後欄位被改或 _complete 回退 → 引擎發 `regressed` 事件（浮上 /owners 與該病人的時間軸）。**優先權例外（與統計相容的明確決策）**：verify 單元若 `_complete=='2'`，**完成規則優先於相依檢查**——狀態為 `complete` 並由 A0 逆序查核（§6.4）開 flag，而**不是** blocked。醫師先簽核的個案在統計上維持與現制一致（今日算 complete），違規以 flag 呈現而非以狀態懲罰。
    - `derived_field`（outcome.etiology / Outcome 死因）：`etiology_final ≠ ''` → complete；否則共識為綠且可對映 → ready（等批次上傳）；否則 `blocked {kind:'awaiting_consensus'}`。
    - `adjudication`（etiology.vote）：票數 < minVotes → in_progress（黃）；綠但 final 未寫 → entered_awaiting_verify（待批次上傳）；**綠但不可對映（cause '1-3'）或紅 → entered_awaiting_verify 加子原因 `needs_manual_map` / `needs_meeting`——終於有持久佇列**（修正被遺忘的「需手動處理」modal）；final 寫入 → complete。
 4. **flagged 覆蓋層**：路由到 (r,u) 的 open QC flag 設 `flagged=true`，不改變基礎狀態；UI 畫徽章、佇列可篩選。「已完成但被 QC 標記」從此可表達。
@@ -395,13 +395,13 @@ CREATE INDEX ON work_event (unit_id, ts);
 CREATE INDEX ON work_event (event_type, ts);
 ```
 
-- `became_ready` 是**交接訊號本體**（含成因，如 gating diff `sur_icu '' → '1'`），以事件當下的指派解析路由到負責人並物化成通知。
+- `became_ready` 是**交接訊號本體**（含成因，如 gating diff `sur_icu '' → '1'`），以事件當下的指派解析算出 `routed_person_ids`——**該找誰**，供視圖標示與催辦信引用（§7.1）。v1.1：不物化成站內通知，沒有收件者。
 - **佇列本身永遠從最新矩陣即時推導**——事件只是「新東西」的增量層，漏掉事件不可能弄丟工作（項目仍在佇列裡）。
-- 涵蓋缺口分析裡每一條隱形交接：助理填完 → 醫師收到「N 位病人待確認」；Outcome 助理填 sur_icu=1 → Lab ICU/Postarrest 負責人收到「N 筆新適用個案」；etiology 判讀翻轉 Trauma 適用性 → trauma 負責人被通知；共識綠批次上傳 → outcome.etiology 自動 complete。
+- 涵蓋缺口分析裡每一條隱形交接，只是「送達」改成 v1.1 的形狀（§1.5）：助理填完 → 醫師名下多出「N 位病人待確認」且負責人看得到它在變老；Outcome 助理填 sur_icu=1 → Lab ICU/Postarrest 名下多出「N 筆新適用個案」；etiology 判讀翻轉 Trauma 適用性 → 同上；共識綠批次上傳 → outcome.etiology 自動 complete。每一條都是負責人視圖上的一列與一顆「提醒」鈕，而不是一封自動寄出的信。
 
 ### 6.4 逆序查核（A0，嫁接自「人員當責」方案）
 
-狀態機會擋住醫師單元直到助理完成，但**醫師直接在 REDCap 把 `_complete` 設成 2 是擋不住的**（REDCap 端無法強制）。新增 QC check **A0 逆序查核**：verify 單元 `_complete='2'` 而其上游助理欄位群組未達完成 → warning flag，路由給該醫師與 manager。一條 catalog 設定就把「軟性流程約束」變成可見、可路由的 flag。
+狀態機會擋住醫師單元直到助理完成，但**醫師直接在 REDCap 把 `_complete` 設成 2 是擋不住的**（REDCap 端無法強制）。新增 QC check **A0 逆序查核**：verify 單元 `_complete='2'` 而其上游助理欄位群組未達完成 → warning flag，routed 標記該醫師（該找誰）、呈現給負責人。一條 catalog 設定就把「軟性流程約束」變成可見、可路由的 flag。
 
 ---
 
@@ -525,7 +525,7 @@ catalog 的每條 check 定義增加 `responsibleUnits`（有序 unit id 清單�
 | 指標 | 定義 |
 |---|---|
 | readyCount | 可動工的待辦（真正的積壓） |
-| inProgressCount / awaitingVerifyCount | 進行中／（醫師的）待確認收件匣 |
+| inProgressCount / awaitingVerifyCount | 進行中／（醫師的）待確認積壓 |
 | blockedCount | **明確不是他的錯**——灰色顯示、不計入成績 |
 | flaggedCount | 被 QC 標記數 |
 | completedTotal / applicableTarget | 完成 ÷ **適用**目標 |
@@ -786,7 +786,7 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 | **4 事件與催辦（v1.1 重寫）** | 每小時快照 cron；快照 diff 發 `work_event`；`/incomplete` 吸收 `/me` 的三個切面（`?person=&state=&since=`）並每列加「提醒」鈕；`outbound_mail` 表 + `/api/nudge`；watchdog cron（scan_missing、快照連兩次失敗寄給負責人）。**取消**：`/me` 頁、`notification` 表、站內鈴鐺、每日 digest cron——沒有收件者（§1.5）。**問題2 至此端到端解決**：狀態機偵測交接、負責人看見、一鍵把清單寄給該做的人（以 Phase 3 的過渡指派解析路由；Phase 5 後自動改走規則） | 負責人能在一個畫面上答出「今天該催誰」，且催完看得到寄出紀錄 |
 | **5 指派規則 v2 + 進度修正** | owner-store.assignments → 每單元一條全域 pool 規則（第一天語意相同）；開放院區/號段/多人規則 + 影響預覽；targetIds → 批次；/owners、/productivity 切 person-id join、操作者歸屬、新成績、URL 篩選；週報加欄位。**v1.1：這是 `/admin/people` 匯入的回收點**——在此之前 person 表沒有任何讀者，顯示名稱字串比對仍在用。**雙軌鏡寫（嫁接自人員當責方案）**：新規則每次異動同步把「最近似單一負責人投影」寫回舊 Redis owner-store blob——transform.ts、/owners、週報**未切換前照常運作**，逐頁切換、零大爆炸 | /admin/parity 新舊數字並跑兩週後，退役 Redis owner-store |
 | **6 QC 生命週期與路由** | qc_flag 持久化、快照 eval upsert/自動解除、responsibleUnits 路由（v1.1：路由的用途是知道該找誰，認領與豁免都是負責人的動作）、雙邊深連結、dry-run+confirmHash；A0 逆序查核上線；F1/F2 語意修正。**`fix route` 加驗證已於 Phase 1 完成** | 獨立上線；首次 eval 以乾淨 open 態起算 |
-| **7 Screening 強化** | 號段保留 + case link + API 匯入（CSV fallback）+ 已匯入 n/N + 確認鎖定；Manual_Review bucket；月覆蓋條 + scan_missing 通知；ed_date 改 regDate（附開關）；院區代碼表修補 | scraper 契約全程未動 |
+| **7 Screening 強化** | 號段保留 + case link + API 匯入（CSV fallback）+ 已匯入 n/N + 確認鎖定；Manual_Review bucket；月覆蓋條 + scan_missing 寄信給負責人（§7.3）；ed_date 改 regDate（附開關）；院區代碼表修補 | scraper 契約全程未動 |
 | **8 Etiology 延續** | etiology_meeting 表取代單一 blob（現 blob 遷為 open meeting）；會議歷史、逐人提醒史；需手動處理常駐佇列；全域欠債；投票計數修正 + 未知代碼警示；範圍化快取失效 | 共識數學、投影模式、RSVP、批次上傳逐位元照搬（含 §11 的兩個明示修正） |
 
 **永不中斷**：REDCap 資料輸入、深連結、scraper 上傳契約、PA 週報契約、已寄出信箱裡的 RSVP 連結、側欄分類、以及每個讀取視圖在其自身遷移 phase 內（每頁在單一 phase 內原子切換資料來源）。**計畫可在任何 phase 後無限期暫停，不留半吊子狀態**——P1 單獨解決記名問題、P2 單獨解決問題3、P3+P4 單獨解決問題2、P5 單獨解決問題1。
@@ -821,7 +821,7 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 3. 種子腳本必須讓 **Phase 2 上線時畫面與數字 pixel 一致**；**Phase 3 依 §15 表中的新舊語意對照表達成數字一致**（parity 頁為證）——新狀態模型與舊 0/1/2 的對映已明定，任何對照表之外的差異都是 bug 或需 G03360 裁決的明示決策（如 NON_ER 欄位集、ed_date 來源）。
 4. 沿用現有 UI 元件體系（shadcn/base-ui、SWR、recharts）與現有頁面骨架；這是**演進**不是重寫——現有 route/hook/component 能留就留。
 5. 中文詞彙沿用團隊既有用語：交接、負責人、未指派、共識會議、優/良/待加強/落後、需手動處理。
-6. 本文件的 SQL 為語意規格；實際 migration 用 drizzle（或 @vercel/postgres）撰寫，欄位語意不可偏離。
+6. 本文件的 SQL 為語意規格；實際 migration 是 `migrations/*.sql` 純 SQL 檔，由 `scripts/migrate.mjs` 依檔名順序套用（Phase 1 已建立，含「目標資料庫有不屬於本專案的資料表就拒跑」的守門）。**沿用它，不要引入 ORM**；欄位語意不可偏離本文件。
 7. 每個 Phase 完成的定義：獨立部署、老功能不壞、該 phase 的驗收判準（§15 表）達成。
 
 ---

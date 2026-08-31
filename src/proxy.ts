@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { USER_COOKIE_NAME, isValidUserToken } from '@/lib/auth';
+import { SESSION_COOKIE_NAME, verifySessionToken } from '@/lib/auth/session';
 
 /**
  * Site-wide user-level gate.
@@ -8,16 +9,21 @@ import { USER_COOKIE_NAME, isValidUserToken } from '@/lib/auth';
  * Next.js 16 renamed `middleware` → `proxy`. See
  * node_modules/next/dist/docs/01-app/01-getting-started/16-proxy.md
  *
- * This proxy requires a valid `user_token` cookie for every request that
- * reaches the `matcher` below. It does NOT touch the admin-level auth —
- * API routes and pages that need admin rights continue to check the
- * `admin_token` cookie themselves.
+ * Every request reaching the `matcher` below must carry either the `session`
+ * cookie naming a person, or — while `LEGACY_AUTH` is on — the shared-password
+ * `user_token`. This is an optimistic gate only, as the Next.js docs ask of a
+ * proxy: it checks a signature, never the database. Anything that depends on
+ * *which* person is asking calls `requireRole` in the route handler itself.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get(USER_COOKIE_NAME)?.value;
 
-  if (isValidUserToken(token)) {
+  const session = verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  if (session) {
+    return NextResponse.next();
+  }
+
+  if (isValidUserToken(request.cookies.get(USER_COOKIE_NAME)?.value)) {
     return NextResponse.next();
   }
 
@@ -40,6 +46,8 @@ export const config = {
   // Match everything EXCEPT:
   //  - /login                      (the login page itself)
   //  - /api/user-auth              (the endpoint the login page POSTs to)
+  //  - /api/auth/request-link      (magic-link request; the caller has no session yet)
+  //  - /api/auth/callback          (magic-link redemption; sets the session)
   //  - /api/screening/upload       (scraper uploads via Bearer token, not cookie)
   //  - /api/rsvp                   (one-click RSVP from email; uses signed token)
   //  - /api/report/weekly          (PA 週報 routine reads via Bearer token, not cookie)
@@ -47,6 +55,6 @@ export const config = {
   //  - /favicon.ico                (icon)
   //  - any file with an extension  (images, fonts, etc. in /public)
   matcher: [
-    '/((?!login|api/user-auth|api/screening/upload|api/rsvp|api/report/weekly|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
+    '/((?!login|api/user-auth|api/auth/request-link|api/auth/callback|api/screening/upload|api/rsvp|api/report/weekly|_next/static|_next/image|favicon\\.ico|.*\\..*).*)',
   ],
 };

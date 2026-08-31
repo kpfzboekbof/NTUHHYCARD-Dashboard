@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { Role } from './roles';
 
 /**
  * Signed session tokens carrying an individual's identity.
@@ -13,9 +14,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  * here needs more than "this payload came from us and has not expired".
  */
 
-export type Role = 'manager' | 'doctor' | 'abstractor' | 'labeler' | 'viewer';
-
-export const ALL_ROLES: Role[] = ['manager', 'doctor', 'abstractor', 'labeler', 'viewer'];
+export { ALL_ROLES, ROLE_LABELS, satisfiesRole, type Role } from './roles';
 
 export interface SessionPayload {
   personId: string;
@@ -63,12 +62,19 @@ export function createSessionToken(
   return `${body}.${sign(body)}`;
 }
 
-/** Returns the payload, or null when the token is malformed, forged or expired. */
+/**
+ * Returns the payload, or null when the token is malformed, forged or expired.
+ *
+ * A missing SESSION_SECRET verifies nothing, so it rejects rather than throws:
+ * this runs in the proxy on every request, and an unset secret should lock the
+ * new login out, not take the whole site down.
+ */
 export function verifySessionToken(
   token: string | undefined,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): SessionPayload | null {
   if (!token) return null;
+  if (!process.env.SESSION_SECRET) return null;
 
   const separator = token.lastIndexOf('.');
   if (separator <= 0) return null;
@@ -93,3 +99,4 @@ export function verifySessionToken(
 export function hasRole(payload: SessionPayload | null, role: Role): boolean {
   return !!payload?.roles.includes(role);
 }
+

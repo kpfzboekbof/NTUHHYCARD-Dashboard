@@ -32,7 +32,45 @@ export function expectedUserToken(): string | null {
 
 /** Check a provided token value against the expected one. Edge-safe. */
 export function isValidUserToken(token: string | undefined | null): boolean {
+  if (!legacyAuthEnabled()) return false;
   const expected = expectedUserToken();
   if (!expected || !token) return false;
   return token === expected;
+}
+
+/* ------------------------------------------------------------------ *
+ * Admin-level shared password.
+ *
+ * The same DJB2 token, previously re-derived inline in five places
+ * (api/auth, api/owners, api/etiology, api/qc/fix, api/etiology-reminder)
+ * — each copy its own chance to drift. It lives here so the migration to
+ * individual identity has one legacy path to delete, not five.
+ * ------------------------------------------------------------------ */
+
+export const ADMIN_COOKIE_NAME = 'admin_token';
+const ADMIN_SALT = '-ohca-admin-salt';
+
+/** Expected admin_token cookie value for the current ADMIN_PASSWORD. */
+export function expectedAdminToken(): string | null {
+  const pw = process.env.ADMIN_PASSWORD || '';
+  if (!pw) return null;
+  return hashString(`${pw}${ADMIN_SALT}`);
+}
+
+export function isValidAdminToken(token: string | undefined | null): boolean {
+  if (!legacyAuthEnabled()) return false;
+  const expected = expectedAdminToken();
+  if (!expected || !token) return false;
+  return token === expected;
+}
+
+/**
+ * Whether the shared-password cookies are still honoured.
+ *
+ * Set `LEGACY_AUTH=off` once everyone has signed in with a magic link at
+ * least once; the DJB2 path then stops being an accepted credential and can
+ * be deleted outright.
+ */
+export function legacyAuthEnabled(): boolean {
+  return (process.env.LEGACY_AUTH || '').toLowerCase() !== 'off';
 }

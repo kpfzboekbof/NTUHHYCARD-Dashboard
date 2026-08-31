@@ -1,32 +1,35 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { ADMIN_COOKIE_NAME, expectedAdminToken } from '@/lib/auth';
+import { getIdentity } from '@/lib/auth/identity';
+import { satisfiesRole } from '@/lib/auth/session';
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const TOKEN_NAME = 'admin_token';
-// Simple token: hash of password + a fixed salt
-function generateToken(): string {
-  const data = `${ADMIN_PASSWORD}-ohca-admin-salt`;
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash) + data.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
+/**
+ * The admin-level shared password.
+ *
+ * Kept working while people move onto individual logins: GET now answers for
+ * either credential, so a manager who signed in with a magic link sees the
+ * admin pages without also typing the shared password.
+ */
+
+const TOKEN_NAME = ADMIN_COOKIE_NAME;
 
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
+    const adminPassword = process.env.ADMIN_PASSWORD || '';
 
-    if (!ADMIN_PASSWORD) {
+    if (!adminPassword) {
       return NextResponse.json({ error: '未設定 ADMIN_PASSWORD 環境變數' }, { status: 500 });
     }
 
-    if (password !== ADMIN_PASSWORD) {
+    if (password !== adminPassword) {
       return NextResponse.json({ error: '密碼錯誤' }, { status: 401 });
     }
 
-    const token = generateToken();
+    const token = expectedAdminToken();
+    if (!token) {
+      return NextResponse.json({ error: '無法產生登入權杖' }, { status: 500 });
+    }
     const response = NextResponse.json({ ok: true });
     response.cookies.set(TOKEN_NAME, token, {
       httpOnly: true,
@@ -41,14 +44,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(TOKEN_NAME)?.value;
-  const expected = generateToken();
-
-  if (!ADMIN_PASSWORD || !token || token !== expected) {
-    return NextResponse.json({ authenticated: false });
-  }
-  return NextResponse.json({ authenticated: true });
+  const identity = await getIdentity();
+  const authenticated = !!identity && satisfiesRole(identity.roles, 'manager');
+  return NextResponse.json({ authenticated });
 }
 
 export async function DELETE() {

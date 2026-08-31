@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchQcRecords, batchImportField } from '@/lib/redcap/client';
 import { clearAllCache } from '@/lib/cache';
 import { requireRole } from '@/lib/auth/identity';
-import { recordAudit } from '@/lib/db/audit';
+import { recordAuditMany } from '@/lib/db/audit';
 
 /**
  * POST /api/qc/fix
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const { imported, missing } = await batchImportField(records);
     clearAllCache();
 
-    await Promise.all(imported.map(studyId => recordAudit({
+    await recordAuditMany(imported.map(studyId => ({
       actor: auth.identity.actor,
       action: 'qc_fix.apply',
       entityType: 'record',

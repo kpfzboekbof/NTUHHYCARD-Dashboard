@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ADMIN_COOKIE_NAME, expectedAdminToken } from '@/lib/auth';
 import { getIdentity } from '@/lib/auth/identity';
-import { satisfiesRole } from '@/lib/auth/session';
+import { SESSION_COOKIE_NAME, satisfiesRole } from '@/lib/auth/session';
 
 /**
  * The admin-level shared password.
@@ -49,8 +49,14 @@ export async function GET() {
   return NextResponse.json({ authenticated });
 }
 
+/**
+ * Sign out. Drops the individual session too, not just the shared admin
+ * cookie — otherwise 登出 does nothing at all for someone who signed in with a
+ * magic link, which is worse than logging them out further than they expected.
+ */
 export async function DELETE() {
   const response = NextResponse.json({ ok: true });
   response.cookies.delete(TOKEN_NAME);
+  response.cookies.delete(SESSION_COOKIE_NAME);
   return response;
 }

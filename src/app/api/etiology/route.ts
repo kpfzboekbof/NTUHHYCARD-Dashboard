@@ -5,7 +5,7 @@ import { getLabelers } from '@/lib/labelers';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import { requireRole } from '@/lib/auth/identity';
-import { recordAudit } from '@/lib/db/audit';
+import { recordAudit, recordAuditMany } from '@/lib/db/audit';
 import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
 
 const CACHE_KEY = 'etiology';
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       // Audit what REDCap confirmed, one row per record: "who set 5123's
       // etiology_final to 7, and when" is the question this answers.
       const byId = new Map(cleaned.map(u => [u.studyId, u.code]));
-      await Promise.all(imported.map(studyId => recordAudit({
+      await recordAuditMany(imported.map(studyId => ({
         actor: auth.identity.actor,
         action: 'etiology_final.write',
         entityType: 'record',

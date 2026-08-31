@@ -70,6 +70,24 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
   }
 }
 
+/**
+ * The same, for a batch that touched many records at once.
+ *
+ * One row per record — "who set 5123's etiology_final to 7" is the question
+ * worth answering, and a single row saying "a batch happened" does not answer
+ * it — but sent as one transaction rather than one HTTP round trip each. A
+ * consensus meeting can confirm hundreds of records in a click.
+ */
+export async function recordAuditMany(entries: AuditEntry[]): Promise<void> {
+  if (!hasDatabase() || entries.length === 0) return;
+  const sql = getSql();
+  try {
+    await sql.transaction(entries.map(entry => auditQuery(sql, entry)));
+  } catch (error) {
+    console.error(`audit write failed for ${entries.length} × ${entries[0].action}`, error);
+  }
+}
+
 export interface AuditRow {
   id: string;
   ts: string;

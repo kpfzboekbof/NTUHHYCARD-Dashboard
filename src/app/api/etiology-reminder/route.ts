@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies, headers } from 'next/headers';
-import * as nodemailer from 'nodemailer';
+import { cookies } from 'next/headers';
 import { fetchEtiologyStatus } from '@/lib/redcap/client';
 import { getLabelers } from '@/lib/labelers';
 import { transformEtiology } from '@/lib/redcap/etiology-transform';
@@ -8,6 +7,7 @@ import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
+import { createTransporter, resolveBaseUrl } from '@/lib/mailer';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 function generateAdminToken(): string {
@@ -29,40 +29,12 @@ async function verifyAdmin(): Promise<boolean> {
   return !!(adminPw && token && token === expected);
 }
 
-function createTransporter() {
-  const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
-  if (!user || !pass) return null;
-
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user, pass },
-  });
-}
-
 /** Filter incomplete records by ID range */
 function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo: number | null): EtiologyRecord[] {
   let result = records.filter(r => r.finalCode === null);
   if (idFrom != null) result = result.filter(r => parseInt(r.studyId) >= idFrom);
   if (idTo != null) result = result.filter(r => parseInt(r.studyId) <= idTo);
   return result;
-}
-
-/** Resolve the public base URL used to build links inside emails. */
-async function resolveBaseUrl(): Promise<string> {
-  const explicit = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_BASE_URL;
-  if (explicit) return explicit.replace(/\/$/, '');
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel.replace(/\/$/, '')}`;
-  // Fall back to the inbound request's host so dev and self-hosted setups
-  // still produce a clickable link.
-  try {
-    const h = await headers();
-    const host = h.get('x-forwarded-host') || h.get('host');
-    const proto = h.get('x-forwarded-proto') || 'http';
-    if (host) return `${proto}://${host}`;
-  } catch {}
-  return 'http://localhost:3000';
 }
 
 /** GET — reminder status: per-labeler incomplete counts + meeting settings */

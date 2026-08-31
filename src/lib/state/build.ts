@@ -63,6 +63,12 @@ export async function deriveCurrentMatrix(): Promise<CurrentMatrix> {
   const rows = await fetchRecordsByFieldsSplit(catalogFieldSet(catalog));
   const etiologyRows = await fetchEtiologyStatus();
 
+  // Same disease as the main export: an empty 200 here would silently flip
+  // every consensus-gated cell (blocked↔ready) and spray false events.
+  if (etiologyRows.length === 0) {
+    throw new Error('REDCap etiology 匯出回傳 0 筆——視為匯出失敗');
+  }
+
   // Observed in production: REDCap under strain answers 200 with an empty
   // body. Treating that as "no records" would blank every view and, worse,
   // let the snapshot cron persist a baseline that says all work vanished.

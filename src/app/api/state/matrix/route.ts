@@ -5,6 +5,7 @@ import { LEGACY_FORM_BY_UNIT_ID } from '@/lib/catalog/seed';
 import { getAssignments } from '@/lib/owner-store';
 import { deriveCurrentMatrix } from '@/lib/state/build';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
+import { HOSPITALS } from '@/config/hospitals';
 import { recentHandoffKeys } from '@/lib/db/events';
 import { hasDatabase } from '@/lib/db/client';
 import { listPeople } from '@/lib/people/repo';
@@ -154,8 +155,11 @@ export async function GET(request: NextRequest) {
     }
 
     const unit = params.get('unit');
+    // Group name (總院/新竹/雲林), matching the header widget — the raw REDCap
+    // codes are an implementation detail nobody filters by.
     const hospital = params.get('hospital');
     const owner = params.get('owner');
+    const studyIdQuery = params.get('studyId');
     const limit = Math.min(Number(params.get('limit')) || DEFAULT_LIMIT, MAX_LIMIT);
     const offset = Math.max(Number(params.get('offset')) || 0, 0);
 
@@ -196,7 +200,8 @@ export async function GET(request: NextRequest) {
     let matched = 0;
 
     for (const record of snapshot.records) {
-      if (hospital && String(record.hospital) !== hospital) continue;
+      if (hospital && (HOSPITALS[record.hospital] ?? String(record.hospital)) !== hospital) continue;
+      if (studyIdQuery && !record.studyId.includes(studyIdQuery)) continue;
 
       for (const cell of record.cells) {
         if (unit && cell.unitId !== unit) continue;

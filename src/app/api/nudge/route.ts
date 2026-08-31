@@ -49,6 +49,13 @@ async function currentMatrix(): Promise<MatrixLike> {
   return fresh;
 }
 
+function taipeiTime(iso: string): string {
+  return new Date(iso).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 function nudgeEmail(
   displayName: string,
   backlog: UnitBacklog[],
@@ -76,7 +83,7 @@ function nudgeEmail(
     html: `
       <div style="font-family: -apple-system, 'Noto Sans TC', sans-serif; line-height: 1.6; max-width: 640px;">
         <p>${escapeHtml(displayName)} 您好，</p>
-        <p>以下是目前掛在您名下、可以進行的登錄工作（依 ${escapeHtml(fetchedAt.slice(0, 16).replace('T', ' '))} 的資料）：</p>
+        <p>以下是目前掛在您名下、可以進行的登錄工作（依 ${escapeHtml(taipeiTime(fetchedAt))} 的資料）：</p>
         ${sections}
         ${note ? `<p style="border-left:3px solid #2563eb;padding-left:12px;">${escapeHtml(note)}</p>` : ''}
         <p style="color:#666;font-size:13px;">每個編號都直接連到 REDCap 的輸入頁。這封信由資料庫負責人送出。</p>

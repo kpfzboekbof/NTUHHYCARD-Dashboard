@@ -36,6 +36,13 @@ const KIND_LABELS: Record<string, string> = {
   login_link: '登入連結',
 };
 
+function taipeiTime(iso: string): string {
+  return new Date(iso).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei', hour12: false,
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   const data = await res.json();
@@ -146,7 +153,7 @@ export default function MailLedgerPage() {
                   {(data?.mail ?? []).map(row => (
                     <tr key={row.id} className="border-b last:border-0">
                       <td className="p-2 pl-4 whitespace-nowrap text-zinc-500">
-                        {row.createdAt.slice(0, 16).replace('T', ' ')}
+                        {taipeiTime(row.createdAt)}
                       </td>
                       <td className="p-2">{KIND_LABELS[row.kind] ?? row.kind}</td>
                       <td className="p-2">

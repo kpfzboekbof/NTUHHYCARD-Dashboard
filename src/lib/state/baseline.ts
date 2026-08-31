@@ -41,6 +41,10 @@ export async function readBaseline(): Promise<Baseline | null> {
   try {
     const result = await get(BASELINE_PATH, {
       access: 'private',
+      // Always from origin: the CDN caches private blobs for up to a month by
+      // default, and a frozen baseline would re-emit the same diff every day
+      // while the watchdog cries stale at a cron that is in fact succeeding.
+      useCache: false,
       abortSignal: AbortSignal.timeout(STORE_TIMEOUT_MS),
     });
     if (!result || result.statusCode !== 200 || !result.stream) return null;
@@ -58,6 +62,7 @@ export async function writeBaseline(baseline: Baseline): Promise<void> {
     contentType: 'application/gzip',
     addRandomSuffix: false,
     allowOverwrite: true,
+    cacheControlMaxAge: 60, // the SDK's minimum; this blob is rewritten daily
     abortSignal: AbortSignal.timeout(STORE_TIMEOUT_MS),
   });
 }

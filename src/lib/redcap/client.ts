@@ -204,14 +204,6 @@ export async function fetchCompletionStatus(): Promise<RawCompletionRecord[]> {
   return aggregateRepeatRows(await fetchRecordsByFieldsSplit(fields));
 }
 
-/**
- * Export an arbitrary field set — used by the state engine, whose fields are
- * computed from the work-unit catalog rather than fixed in code.
- */
-export async function fetchRecordsByFields(fields: string[]): Promise<RedcapRow[]> {
-  return exportRecords(fields);
-}
-
 export async function fetchUsers(): Promise<RawUser[]> {
   const res = await redcapPost({
     content: 'user',

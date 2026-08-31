@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { ExternalLink, Mail, Sparkles } from 'lucide-react';
 import { Header } from '@/components/layout/header';
+import { useFilters } from '@/hooks/use-filters';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { WorkState } from '@/lib/state/types';
@@ -109,9 +110,15 @@ function QueueView() {
 
   const state = searchParams.get('state') ?? DEFAULT_STATES;
   const unit = searchParams.get('unit') ?? '';
-  const owner = searchParams.get('owner') ?? '';
   const since = searchParams.get('since') ?? '';
   const page = Math.max(Number(searchParams.get('page')) || 0, 0);
+
+  // The sticky header's 負責人/院區 selects drive this page, as they did before
+  // the state-engine cutover; ?owner= in the URL wins so a slice stays
+  // pasteable even though the header widget itself is client state.
+  const { filters } = useFilters();
+  const owner = searchParams.get('owner') || (filters.owner !== '全部' ? filters.owner : '');
+  const hospital = filters.hospital !== '全部' ? filters.hospital : '';
 
   // Every facet lives in the URL, so a slice of the queue is a pasteable link.
   const setParam = useCallback((key: string, value: string) => {
@@ -122,10 +129,15 @@ function QueueView() {
     router.replace(`${pathname}?${next.toString()}`);
   }, [router, pathname, searchParams]);
 
+  const [search, setSearch] = useState('');
+
   const query = new URLSearchParams({ state, limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE) });
   if (unit) query.set('unit', unit);
   if (owner) query.set('owner', owner);
+  if (hospital) query.set('hospital', hospital);
   if (since) query.set('since', since);
+  // Server-side: the match must cover the whole slice, not the visible page.
+  if (search.trim()) query.set('studyId', search.trim());
 
   const { data, error, isLoading, mutate } = useSWR<MatrixResponse>(
     `/api/state/matrix?${query.toString()}`,
@@ -133,7 +145,6 @@ function QueueView() {
     { revalidateOnFocus: false },
   );
 
-  const [search, setSearch] = useState('');
   const [nudging, setNudging] = useState(false);
   const [nudgeResult, setNudgeResult] = useState('');
 
@@ -176,17 +187,19 @@ function QueueView() {
     }
   }, [nudgeTarget, nudging]);
 
-  const cells = useMemo(() => {
-    const all = data?.cells ?? [];
-    if (!search) return all;
-    return all.filter(c => c.studyId.includes(search.trim()));
-  }, [data, search]);
+  const cells = data?.cells ?? [];
 
   const totalPages = data ? Math.ceil(data.matched / PAGE_SIZE) : 0;
 
   return (
     <>
-      <Header title="未完成清單" fetchedAt={data?.fetchedAt} onRefresh={() => mutate()} isLoading={isLoading} />
+      <Header
+        title="未完成清單"
+        fetchedAt={data?.fetchedAt}
+        onRefresh={() => mutate()}
+        isLoading={isLoading}
+        owners={owners}
+      />
       <div className="space-y-4 p-6">
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
@@ -201,11 +214,6 @@ function QueueView() {
               {(data?.units ?? []).map(u => <option key={u.unitId} value={u.unitId}>{u.label}</option>)}
             </select>
 
-            <label className="text-zinc-500">負責人：</label>
-            <select className="rounded border px-2 py-1" value={owner} onChange={e => setParam('owner', e.target.value)}>
-              <option value="">全部</option>
-              {owners.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
 
             <label className="flex items-center gap-1 text-zinc-500">
               <input

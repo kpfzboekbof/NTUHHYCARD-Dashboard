@@ -57,30 +57,29 @@ export async function GET(request: Request) {
       }, { status: 502 });
     }
 
-    let eventsWritten = 0;
-    let eventsFound = 0;
-    if (baseline) {
-      const events = diffMatrices(baseline.records, matrix.records);
-      eventsFound = events.length;
+    const events = baseline ? diffMatrices(baseline.records, matrix.records) : [];
 
-      if (hasDatabase() && events.length > 0) {
-        const [assignments, people] = await Promise.all([getAssignments(), listPeople(true)]);
-        const unitIds = [...new Set(events.map(e => e.unitId))];
-        const routing = buildUnitRouting(unitIds, assignments, people);
-        eventsWritten = await insertWorkEvents(events, matrix.fetchedAt, routing);
-      }
-    }
-
-    // The baseline advances even when the events could not be stored: replaying
-    // the same diff next run would double-count every handoff.
+    // Baseline first, events second — losing beats duplicating. If the insert
+    // fails after the baseline advanced, this window's events are gone, which
+    // by design costs only their "since when" (the queue re-derives). The
+    // reverse order would replay the same diff next run and double-count every
+    // handoff, and work_event has no natural key to dedupe on.
     await writeBaseline({ fetchedAt: matrix.fetchedAt, records: matrix.records });
+
+    let eventsWritten = 0;
+    if (hasDatabase() && events.length > 0) {
+      const [assignments, people] = await Promise.all([getAssignments(), listPeople(true)]);
+      const unitIds = [...new Set(events.map(e => e.unitId))];
+      const routing = buildUnitRouting(unitIds, assignments, people);
+      eventsWritten = await insertWorkEvents(events, matrix.fetchedAt, routing);
+    }
 
     return NextResponse.json({
       ok: true,
       records: matrix.records.length,
       firstRun: !baseline,
       baselineWas: baseline?.fetchedAt ?? null,
-      eventsFound,
+      eventsFound: events.length,
       eventsWritten,
       tookMs: Date.now() - startedAt,
     });

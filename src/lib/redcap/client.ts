@@ -115,6 +115,38 @@ async function exportWithRetry(fields: string[]): Promise<RedcapRow[]> {
 }
 
 /**
+ * Run tasks with a bounded number in flight.
+ *
+ * Not `Promise.all`: this exists precisely because unbounded concurrency is
+ * what makes the REDCap server fall over.
+ */
+async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      out[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * How many export requests may be in flight at once.
+ *
+ * Measured against the live project: fully parallel grinds the server to a
+ * crawl (a whole derive went from ~64s to over ten minutes), strictly
+ * sequential costs ~53s for the repeat-form half alone, and three at a time
+ * costs ~22s with no failures across fifteen requests. Three it is — the
+ * function has a 60-second budget on Vercel's Hobby plan, and a snapshot that
+ * cannot finish inside it never runs at all.
+ */
+const EXPORT_CONCURRENCY = 3;
+
+/**
  * A wide export, split so REDCap can actually serve it.
  *
  * One flat request for N fields returns every repeat row of every touched
@@ -123,8 +155,7 @@ async function exportWithRetry(fields: string[]): Promise<RedcapRow[]> {
  * with a 500 (or worse, a 200 with an empty body). Splitting by residence
  * keeps each response small: fields on non-repeating forms come back as main
  * rows only (7k rows), and each repeating instrument's fields are fetched on
- * their own (its repeats + mains, a few MB). Requests run sequentially — the
- * point is to be gentle with a server that has already shown it can buckle.
+ * their own (its repeats + mains, a few MB).
  *
  * Concatenating the responses is sound because downstream merging keys on
  * (study_id, repeat instrument) and skips empty values.
@@ -144,11 +175,20 @@ export async function fetchRecordsByFieldsSplit(fields: string[]): Promise<Redca
   }
   if (!mainFields.includes('study_id')) mainFields.unshift('study_id');
 
+  // The main export first and alone: it is the largest single response, and
+  // starting the repeat exports beside it is the shape that overwhelmed the
+  // server.
   let rows = await exportWithRetry(mainFields);
-  for (const formFields of byRepeatForm.values()) {
+
+  const batches = await mapWithLimit(
+    [...byRepeatForm.values()],
+    EXPORT_CONCURRENCY,
+    formFields => exportWithRetry(['study_id', ...formFields]),
+  );
+  for (const batch of batches) {
     // concat, not push(...batch): spreading 150k rows as arguments overflows
     // the call stack.
-    rows = rows.concat(await exportWithRetry(['study_id', ...formFields]));
+    rows = rows.concat(batch);
   }
   return rows;
 }

@@ -15,18 +15,19 @@ test('_complete fields count as known even though REDCap omits them', () => {
 });
 
 test('an instrument the catalog reads but REDCap lacks is reported', () => {
-  // The live case: the catalog carried ntuh_exam_holtertreadmill, whose
-  // _complete field read empty for all 7169 records because REDCap has no
-  // such instrument — the Holter answers are fields inside examcheck.
+  // This is how ntuh_exam_holtertreadmill was caught: REDCap had no such
+  // instrument, so its _complete field read empty for all 7169 records and the
+  // form sat at 0% of a 1000 target forever, with nobody able to finish it.
   const catalog = buildSeedCatalog();
+  const dropped = catalog.units[0].redcapForm;
   const metadata = dictionary(
     [...new Set(catalog.units.map(u => u.redcapForm))]
-      .filter(form => form !== 'ntuh_exam_holtertreadmill')
+      .filter(form => form !== dropped)
       .map(form => [form, `${form}_field`] as [string, string]),
   );
 
   const drift = detectDrift(catalog, metadata);
-  assert.deepEqual(drift.missingForms, ['ntuh_exam_holtertreadmill']);
+  assert.deepEqual(drift.missingForms, [dropped]);
   assert.equal(drift.clean, false);
 });
 
@@ -34,12 +35,12 @@ test('an instrument REDCap has but nothing tracks is reported', () => {
   const catalog = buildSeedCatalog();
   const metadata = dictionary([
     ...[...new Set(catalog.units.map(u => u.redcapForm))].map(f => [f, `${f}_field`] as [string, string]),
-    ['ntuh_exam_ct', 'date_ct'],
+    ['ntuh_some_new_instrument', 'a_field'],
   ]);
 
   const drift = detectDrift(catalog, metadata);
   assert.deepEqual(drift.missingForms, []);
-  assert.ok(drift.untrackedForms.includes('ntuh_exam_ct'));
+  assert.deepEqual(drift.untrackedForms, ['ntuh_some_new_instrument']);
 });
 
 test('a dictionary covering the catalog reports clean', () => {

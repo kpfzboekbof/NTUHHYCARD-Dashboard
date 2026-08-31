@@ -6,9 +6,25 @@ import { FORMS, EXAM_FORMS, VIRTUAL_FORMS } from '@/config/forms';
 const catalog = buildSeedCatalog();
 const byId = new Map(catalog.units.map(u => [u.unitId, u]));
 
-test('seeds 32 units: 31 forms plus the exclusion decision', () => {
-  assert.equal(FORMS.length, 31, 'FORMS changed — update the seed expectations');
-  assert.equal(catalog.units.length, 32);
+test('seeds 34 units: 33 forms plus the exclusion decision', () => {
+  assert.equal(FORMS.length, 33, 'FORMS changed — update the seed expectations');
+  assert.equal(catalog.units.length, 34);
+});
+
+test('every catalog form exists as a REDCap instrument', () => {
+  // ntuh_exam_holtertreadmill used to sit here: REDCap has no such instrument,
+  // so its _complete field read empty for every record and the form was stuck
+  // at 0% of a 1000 target forever. The Holter and treadmill answers are radio
+  // fields inside ntuh_nhi_examcheck.
+  assert.ok(!byId.has('ntuh_exam_holtertreadmill'));
+  for (const id of ['ntuh_nhi_ed_vital', 'ntuh_nhi_postarrest_vital', 'ntuh_exam_ct']) {
+    assert.ok(byId.has(id), `${id} should be tracked`);
+  }
+});
+
+test('postarrest vitals are ICU-gated like the other ICU forms', () => {
+  // 2034 of 2211 ICU patients have it complete; no non-ICU patient does.
+  assert.equal(byId.get('ntuh_nhi_postarrest_vital')!.applicability.expr, "sur_icu == '1'");
 });
 
 test('every plain form becomes a full_form unit keyed by its own name', () => {

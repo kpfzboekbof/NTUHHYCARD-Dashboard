@@ -8,9 +8,11 @@ export const FORMS: FormConfig[] = [
   { name: 'ntuh_nhi_core_assistant',     label: 'Core 助理',       target: 6000 },
   { name: 'ntuh_nhi_core_doctor',        label: 'Core 醫師',       target: 6000 },
   { name: 'ntuh_nhi_core_cpr',          label: 'Core CPR',         target: 6000 },
+  { name: 'ntuh_nhi_ed_vital',          label: 'ED Vital',         target: 6000 },
   { name: 'h14trauma_ohca_transfusion', label: 'Trauma',           target: 2000 },
   { name: 'ntuh_nhi_lab_ed',            label: 'Lab ED',           target: 6000 },
   { name: 'ntuh_nhi_lab_icu',           label: 'Lab ICU',          target: 6000 },
+  { name: 'ntuh_nhi_postarrest_vital',  label: 'Postarrest Vital', target: 6000 },
   { name: 'ntuh_nhi_postarrest_care',   label: 'Postarrest Care',  target: 6000 },
   { name: 'ntuh_nhi_examcheck',         label: 'Exam Check',       target: 6000 },
   { name: 'ntuh_exam_cag',              label: 'CAG',              target: 1500 },
@@ -22,7 +24,7 @@ export const FORMS: FormConfig[] = [
   { name: 'ntuh_exam_patho',           label: 'Patho',            target: 500 },
   { name: 'ntuh_exam_lft_2',           label: 'LFT',              target: 1000 },
   { name: 'ntuh_exam_eeg',             label: 'EEG',              target: 1000 },
-  { name: 'ntuh_exam_holtertreadmill', label: 'Holter/Treadmill', target: 1000 },
+  { name: 'ntuh_exam_ct',              label: 'CT',               target: 2000 },
   { name: 'ntuh_nhi_etiology',         label: 'Etiology',         target: 6000 },
   { name: 'ntuh_nhi_outcome_assistant', label: 'Outcome 助理',    target: 6000 },
   { name: 'ntuh_nhi_outcome_doctor',    label: 'Outcome 醫師',    target: 6000 },
@@ -81,7 +83,7 @@ export const EXAM_FORMS = [
   'ntuh_exam_cag', 'ntuh_exam_ucg', 'ntuh_exam_abd_echo',
   'ntuh_exam_pes', 'ntuh_exam_colon', 'ntuh_nhi_op',
   'ntuh_exam_patho', 'ntuh_exam_lft_2', 'ntuh_exam_eeg',
-  'ntuh_exam_holtertreadmill',
+  'ntuh_exam_ct',
 ];
 
 /** 基本表單 = 所有表單 - 檢查表單 */

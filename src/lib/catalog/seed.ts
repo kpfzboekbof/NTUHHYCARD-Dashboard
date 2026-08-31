@@ -17,7 +17,7 @@ import type { CatalogDoc, CatalogSettings, WorkUnit } from './types';
  * one. Once every reader is on the catalog, forms.ts retires and this becomes
  * the starting point that the admin UI edits.
  *
- * 32 units: 30 carried over 1:1 from FORMS, ntuh_nhi_etiology re-seeded as the
+ * 34 units: 32 carried over 1:1 from FORMS, ntuh_nhi_etiology re-seeded as the
  * adjudication unit `etiology.vote`, and `patient.screening` added for the
  * exclusion decision that today has no owner at all.
  */
@@ -138,6 +138,10 @@ const REPLACEMENTS: Record<string, SpecialUnit> = {
 /** Applicability rules that live inline in transformCompletion today. */
 const APPLICABILITY: Record<string, WorkUnit['applicability']> = {
   ntuh_nhi_lab_icu: {
+    expr: "sur_icu == '1'",
+    gatingFields: [{ field: 'sur_icu', enteredByUnit: 'outcome.assistant', aggregation: 'main' }],
+  },
+  ntuh_nhi_postarrest_vital: {
     expr: "sur_icu == '1'",
     gatingFields: [{ field: 'sur_icu', enteredByUnit: 'outcome.assistant', aggregation: 'main' }],
   },

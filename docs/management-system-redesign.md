@@ -236,12 +236,16 @@ CREATE TABLE audit_log (
 }
 ```
 
-**種子單元權威清單（共 32 個單元）**：`forms.ts` 的 31 筆中，30 筆 1:1 轉入；`ntuh_nhi_etiology` 改種為 adjudication 單元 `etiology.vote`（沿用其 target/sortOrder）；另**新增** `patient.screening`。單元可加 `hidden: true` 旗標（取代現行 hiddenForms）：隱藏單元不出現在熱力圖欄、/me 佇列與任何分母，但 `/api/state/matrix?includeHidden=1` 仍可取得。
+**種子單元權威清單（共 34 個單元）**：`forms.ts` 的 33 筆中，32 筆 1:1 轉入；`ntuh_nhi_etiology` 改種為 adjudication 單元 `etiology.vote`（沿用其 target/sortOrder）；另**新增** `patient.screening`。
+
+> **對正式 schema 校正過（2026-08）**：`ntuh_exam_holtertreadmill` 已移除——REDCap 沒有這個 instrument，其 `_complete` 對全部 7,169 筆記錄皆為空，該表永遠停在 0/1000；Holter 與 treadmill 實際上是 `ntuh_nhi_examcheck` 的兩個 radio 欄位。同時納入 REDCap 有但先前未追蹤的三個 instrument：`ntuh_nhi_ed_vital`、`ntuh_nhi_postarrest_vital`、`ntuh_exam_ct`。
+
+單元可加 `hidden: true` 旗標（取代現行 hiddenForms）：隱藏單元不出現在熱力圖欄、/me 佇列與任何分母，但 `/api/state/matrix?includeHidden=1` 仍可取得。
 
 | unitId | kind | redcapForm | 來源 |
 |---|---|---|---|
-| ntuh_nhi_patient、ntuh_nhi_basic_info_38971b、ntuh_nhi_predisease、ntuh_nhi_preohca_hos_use、ntuh_nhi_core_cpr、h14trauma_ohca_transfusion、ntuh_nhi_lab_ed、ntuh_nhi_lab_icu、ntuh_nhi_postarrest_care、ntuh_nhi_examcheck、ntuh_nhi_discharge、h6_validation_add、h12_ed_manage_short_outcome、ntuh_nhi_environment、h20_mtdna | full_form（`complete_field` 規則，共 15） | 同名 | forms.ts 1:1 |
-| ntuh_exam_cag、ntuh_exam_ucg、ntuh_exam_abd_echo、ntuh_exam_pes、ntuh_exam_colon、ntuh_nhi_op、ntuh_exam_patho、ntuh_exam_lft_2、ntuh_exam_eeg、ntuh_exam_holtertreadmill | full_form（category: exam，共 10） | 同名 | forms.ts 1:1 |
+| ntuh_nhi_patient、ntuh_nhi_basic_info_38971b、ntuh_nhi_predisease、ntuh_nhi_preohca_hos_use、ntuh_nhi_core_cpr、**ntuh_nhi_ed_vital**、h14trauma_ohca_transfusion、ntuh_nhi_lab_ed、ntuh_nhi_lab_icu、**ntuh_nhi_postarrest_vital**、ntuh_nhi_postarrest_care、ntuh_nhi_examcheck、ntuh_nhi_discharge、h6_validation_add、h12_ed_manage_short_outcome、ntuh_nhi_environment、h20_mtdna | full_form（`complete_field` 規則，共 17） | 同名 | forms.ts 1:1 |
+| ntuh_exam_cag、ntuh_exam_ucg、ntuh_exam_abd_echo、ntuh_exam_pes、ntuh_exam_colon、ntuh_nhi_op、ntuh_exam_patho、ntuh_exam_lft_2、ntuh_exam_eeg、**ntuh_exam_ct** | full_form（category: exam，共 10） | 同名 | forms.ts 1:1 |
 | core.assistant | field_group | ntuh_nhi_core | forms.ts 虛擬單元轉入 |
 | core.doctor | verify（`ntuh_nhi_core_complete`） | ntuh_nhi_core | forms.ts 虛擬單元轉入 |
 | outcome.assistant | field_group | ntuh_nhi_outcome | forms.ts 虛擬單元轉入 |
@@ -250,7 +254,7 @@ CREATE TABLE audit_log (
 | etiology.vote | adjudication | ntuh_nhi_etiology（repeat） | forms.ts 的 ntuh_nhi_etiology **改型** |
 | patient.screening | field_group（僅 `exclusion` 欄） | ntuh_nhi_patient | **新增**（§6.2 步驟 0 的責任單元） |
 
-（統計：`complete_field` 25 個 = 15 basic full_form + 10 exam；field_group 3；verify 2；derived_field 1；adjudication 1。）
+（統計：`complete_field` 27 個 = 17 basic full_form + 10 exam；field_group 3；verify 2；derived_field 1；adjudication 1，合計 34。）
 
 ### 4.3 適用性表達式（applicability expr）
 
@@ -262,7 +266,7 @@ CREATE TABLE audit_log (
 
 | 單元 | expr | gating 欄位（由誰填） |
 |---|---|---|
-| ntuh_nhi_lab_icu、ntuh_nhi_postarrest_care | `sur_icu == '1'` | sur_icu（outcome.assistant，主列） |
+| ntuh_nhi_lab_icu、ntuh_nhi_postarrest_vital、ntuh_nhi_postarrest_care | `sur_icu == '1'` | sur_icu（outcome.assistant，主列） |
 | h14trauma_ohca_transfusion | `cause_all_etiology_new == '1'` | cause_all_etiology_new（etiology.vote，`aggregation:'any'`） |
 | h20_mtdna | `true`（**與現行 1:1**——現行程式對所有病人適用 mtDNA；未來要限縮再由 G03360 在 /admin 改成 `studyIdNum <= batch('mtdna').cutoff` 並建立 slug=mtdna 的批次） | — |
 | 其他 | `true` | — |
@@ -338,7 +342,7 @@ stateDiagram-v2
 1. **適用性**：三值評估 expr。gating 欄位為空 → `blocked`，blockReason `{kind:'awaiting_gate', field:'sur_icu', enteredByUnit:'outcome.assistant'}`——「還不知道適不適用」與 N/A、與落後，三者可見地不同（修正熱力圖把 N/A 畫成紅色的謊言，`completion-heatmap.tsx:95`）。expr false → `not_applicable`。true → 續。
 2. **相依**：`verify_after`：verify 單元被擋直到來源單元達 `entered_awaiting_verify`（例外見規則 3 的 verify 條目）。`data_gate`：來源單元 `state == complete` 才解除——**種子不含任何 data_gate 邊**，此類型保留給 G03360 未來在 catalog 編輯器手動加邊用。`soft_order` 永不阻擋，只排序佇列。被擋 → `blocked`，blockReason `{kind:'awaiting_unit', unitId}`。（catalog 驗證器拒絕循環。）
 3. **完成規則**（依類型）：
-   - `complete_field`（一般表單，25 個，見 §4.2 種子表）：`_complete=='2'`→complete；`'1'`→in_progress；`'0'`/缺→ready。Repeat instrument 沿用 MAX 聚合（相容性決策，見 §14 已知限制）。
+   - `complete_field`（一般表單，27 個，見 §4.2 種子表）：`_complete=='2'`→complete；`'1'`→in_progress；`'0'`/缺→ready。Repeat instrument 沿用 MAX 聚合（相容性決策，見 §14 已知限制）。
    - `required_fields`（欄位群組，如 core.assistant / outcome.assistant）：0 欄填→ready；部分→in_progress；**全填**→有下游 verify 單元未完成時為 `entered_awaiting_verify`，否則 complete；配對 verify 單元完成時→complete。**這就是缺失的「助理已輸入、待醫師確認」狀態**；醫師得到明確觸發：core.doctor 被擋到 core.assistant 達 entered_awaiting_verify 才變 ready——**交接是狀態轉移，不是默契**。
    - `verify`（core.doctor / outcome.doctor）：blocked → 來源 entered 後 ready → `_complete=='1'` in_progress → `'2'` complete。完成後欄位被改或 _complete 回退 → 引擎發 `regressed` 事件通知雙方。**優先權例外（與統計相容的明確決策）**：verify 單元若 `_complete=='2'`，**完成規則優先於相依檢查**——狀態為 `complete` 並由 A0 逆序查核（§6.4）開 flag，而**不是** blocked。醫師先簽核的個案在統計上維持與現制一致（今日算 complete），違規以 flag 呈現而非以狀態懲罰。
    - `derived_field`（outcome.etiology / Outcome 死因）：`etiology_final ≠ ''` → complete；否則共識為綠且可對映 → ready（等批次上傳）；否則 `blocked {kind:'awaiting_consensus'}`。
@@ -475,7 +479,7 @@ catalog 的每條 check 定義增加 `responsibleUnits`（有序 unit id 清單�
 
 - `patientProgress = 完成的適用單元 ÷ 全部適用單元`；phase chip 由里程碑單元推導（基本 → 檢查 → 判讀 → 結案）。
 - /dashboard 頭條加「**完整完成病人數 N / 6000**」（放在既有 cell 比例旁）。
-- 單一病人頁：32 個單元（§4.2 種子表）的 pipeline、狀態、阻擋原因、負責人、事件時間軸、每單元深連結——**第一次能看到一個病人的完整旅程**。
+- 單一病人頁：34 個單元（§4.2 種子表）的 pipeline、狀態、阻擋原因、負責人、事件時間軸、每單元深連結——**第一次能看到一個病人的完整旅程**。
 
 ### 9.3 批次（一般化 targetIds）
 
@@ -604,7 +608,7 @@ CREATE TABLE etiology_meeting (
 | `/owners` 負責人進度 | 演進 | §9.1 的每人指標表 + 提醒鈕；未指派 bucket 一鍵開規則表單；鑽取頁含「依阻擋者分組」 |
 | `/incomplete` 未完成清單 | 演進 | 全域佇列瀏覽器（state/unit/person/hospital/batch/flagged 篩選、URL 參數）；預設視圖模擬今日清單（state ∈ ready\|in_progress）維持連續感；last-visited 改為伺服器端逐人保存（Postgres `person_page_state (person_id, page, state jsonb, updated_at, PRIMARY KEY(person_id,page))`） |
 | **`/patients`** | **新增** | 病人層級進度清單（studyId、院區、phase chip、適用完成 %、open flags） |
-| **`/patients/[studyId]`** | **新增** | 單一病人 32 單元 pipeline（§4.2 種子表；隱藏單元不列）+ 事件時間軸 + 每單元深連結 |
+| **`/patients/[studyId]`** | **新增** | 單一病人 34 單元 pipeline（§4.2 種子表；隱藏單元不列）+ 事件時間軸 + 每單元深連結 |
 | `/etiology` | 演進 | 原有全部保留；新增「需手動處理」分頁、全域欠債視圖、會議歷史、未知代碼警示 |
 | `/qc` 品質管制 | 演進 | 13 條記錄級 check + 新增 A0（F1/F2 行為類**移列 /owners**，見 §8.2）；新增 狀態/負責人/首次偵測 欄與 認領/豁免 動作、跨表雙邊深連結、B1 dry-run modal |
 | `/heatmap` 熱力圖 | 演進 | 6 態 + flagged 共 7 色（灰 N/A、斜紋 blocked、**淺灰底描邊** ready（純白在淺色模式與底色不可分）、黃 in-progress、藍 awaiting-verify、綠 complete、紅圈 flagged；深淺色模式各自指定 token）；排除記錄過濾；study id 數值排序（修正字串排序）；欄序取 catalog sortOrder |

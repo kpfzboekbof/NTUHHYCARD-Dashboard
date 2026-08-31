@@ -63,6 +63,29 @@ export async function redeemLoginToken(token: string | undefined): Promise<strin
 }
 
 /**
+ * Whether a live, unspent link was issued for this person moments ago.
+ *
+ * `/api/auth/request-link` has to be unauthenticated, so this is what stops a
+ * loop against a known address from filling that person's inbox — and from
+ * burning the Gmail send quota the consensus reminders depend on.
+ */
+export async function hasRecentLoginToken(
+  personId: string,
+  withinSeconds = 120,
+): Promise<boolean> {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT 1 FROM login_token
+     WHERE person_id = ${personId}
+       AND used_at IS NULL
+       AND expires_at > now()
+       AND created_at > now() - make_interval(secs => ${withinSeconds})
+     LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
+/**
  * Drops spent and expired rows. Nothing depends on them once used — the audit
  * trail records the sign-in, not the token.
  */

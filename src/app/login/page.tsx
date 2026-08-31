@@ -6,8 +6,15 @@ import { Lock, Mail } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { safeInternalPath } from '@/lib/safe-path';
 
-/** What `/api/auth/callback` bounced back here for, in words. */
+/**
+ * What `/api/auth/callback` bounced back here for, in words.
+ *
+ * Read through `linkError` below, never indexed directly: `?error=constructor`
+ * would otherwise resolve up the prototype chain to a function, and `useState`
+ * treats a function argument as a lazy initializer and calls it.
+ */
 const LINK_ERRORS: Record<string, string> = {
   'link-invalid': '這個登入連結已失效或已被使用，請重新索取。',
   inactive: '這個帳號已停用，請聯絡管理者。',
@@ -15,19 +22,13 @@ const LINK_ERRORS: Record<string, string> = {
   error: '登入時發生錯誤，請再試一次。',
 };
 
-/**
- * Only allow same-site absolute paths as the post-login destination.
- * Anything else (`//evil.com`, `javascript:…`, relative paths) falls back
- * to `/` — the redirect target must never be an unsanitized URL.
- */
-function safeRedirectPath(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
+function linkError(key: string | null): string {
+  return key && Object.hasOwn(LINK_ERRORS, key) ? LINK_ERRORS[key] : '';
 }
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const from = safeRedirectPath(searchParams.get('from'));
+  const from = safeInternalPath(searchParams.get('from'));
 
   // Two ways in while the migration runs: the shared password everyone
   // already knows, and a link to your own mailbox that signs you in as you.
@@ -35,7 +36,7 @@ function LoginForm() {
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [linkSent, setLinkSent] = useState(false);
-  const [error, setError] = useState(LINK_ERRORS[searchParams.get('error') ?? ''] ?? '');
+  const [error, setError] = useState(linkError(searchParams.get('error')));
   const [verifying, setVerifying] = useState(false);
   // Stays true until the browser tears this page down — the button keeps
   // showing「登入成功」so the user knows the login worked while the

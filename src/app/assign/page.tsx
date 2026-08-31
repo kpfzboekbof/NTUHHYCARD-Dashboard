@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { FORMS } from '@/config/forms';
+import { logoutAdmin } from '@/lib/logout';
 import type { User, OwnerAssignments } from '@/types';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -51,7 +52,7 @@ export default function AssignPage() {
   }, [password]);
 
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
+    await logoutAdmin();
     setAuthenticated(false);
   }, []);
 

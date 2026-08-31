@@ -38,7 +38,9 @@ test('a rename in REDCap updates the existing row instead of duplicating it', ()
   const existing = [person({ redcapUsername: 'G03360', displayName: '王小明', email: 'a@ntuh.gov.tw' })];
   const plan = planImport([user('G03360', '王', '大明', 'a@ntuh.gov.tw')], existing);
   assert.equal(plan.create.length, 0);
-  assert.deepEqual(plan.update, [{ id: 'id-1', displayName: '王小明', changes: { displayName: '王大明' } }]);
+  assert.equal(plan.update.length, 1);
+  assert.equal(plan.update[0].current.id, 'id-1');
+  assert.deepEqual(plan.update[0].changes, { displayName: '王大明' });
 });
 
 test('nothing to do is nothing to write', () => {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { logoutAdmin } from '@/lib/logout';
 
 interface AdminAuthState {
   authenticated: boolean | null;
@@ -117,7 +118,7 @@ export function useAdminAuth(): AdminAuthState {
 
   const handleLogout = useCallback(async () => {
     try {
-      await fetch('/api/auth', { method: 'DELETE' });
+      await logoutAdmin();
     } catch {
       // Even if the request fails, reset local state so the UI returns
       // to the login screen instead of appearing stuck.

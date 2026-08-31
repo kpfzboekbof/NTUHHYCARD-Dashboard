@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { hasDatabase } from '@/lib/db/client';
 import { findById } from '@/lib/people/repo';
 import { redeemLoginToken } from '@/lib/auth/login-token';
-import { writeAudit } from '@/lib/db/audit';
+import { recordAudit } from '@/lib/db/audit';
+import { safeInternalPath } from '@/lib/safe-path';
 import {
   SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, createSessionToken,
 } from '@/lib/auth/session';
@@ -22,15 +23,6 @@ function toLogin(request: Request, reason: string) {
   return NextResponse.redirect(url);
 }
 
-/**
- * Only same-site paths are honoured, so a crafted link cannot bounce someone
- * through a real login into somewhere else.
- */
-function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const token = url.searchParams.get('token') ?? undefined;
@@ -46,7 +38,7 @@ export async function GET(request: Request) {
     const person = await findById(personId);
     if (!person || !person.active) return toLogin(request, 'inactive');
 
-    const response = NextResponse.redirect(new URL(safeNext(url.searchParams.get('next')), request.url));
+    const response = NextResponse.redirect(new URL(safeInternalPath(url.searchParams.get('next')), request.url));
     response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(person.id, person.roles), {
       httpOnly: true,
       sameSite: 'lax',
@@ -55,7 +47,10 @@ export async function GET(request: Request) {
       maxAge: SESSION_TTL_SECONDS,
     });
 
-    await writeAudit({
+    // Deliberately non-fatal. The token has already been spent by the time we
+    // get here, so throwing would burn a single-use link and hand back no
+    // session — the person would be locked out with no way to sign in.
+    await recordAudit({
       actor: { personId: person.id },
       action: 'login_link.redeem',
       entityType: 'person',

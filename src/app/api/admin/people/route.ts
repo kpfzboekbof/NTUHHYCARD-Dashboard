@@ -24,12 +24,15 @@ function noDatabase() {
   );
 }
 
+/**
+ * `undefined` means "not supplied"; an empty array means the caller sent roles
+ * that are all invalid or none at all, which is refused rather than dropped —
+ * silently ignoring it answers 200 while changing nothing.
+ */
 function parseRoles(value: unknown): Role[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const roles = value.filter((r): r is Role => ALL_ROLES.includes(r as Role));
-  // An empty role list would leave someone signed in but unable to view
-  // anything, which reads as a bug rather than a decision.
-  return roles.length > 0 ? Array.from(new Set(roles)) : undefined;
+  return Array.from(new Set(roles));
 }
 
 export async function GET(request: Request) {
@@ -70,6 +73,9 @@ export async function POST(request: Request) {
       labelerCode: Number.isInteger(body.labelerCode) ? body.labelerCode : null,
       roles: parseRoles(body.roles) ?? ['viewer'],
     };
+    if (input.roles && input.roles.length === 0) {
+      return NextResponse.json({ error: '至少要給一個角色' }, { status: 400 });
+    }
 
     const person = await createPerson(input, auth.identity.actor);
     return NextResponse.json({ person });
@@ -95,8 +101,19 @@ export async function PATCH(request: Request) {
     }
 
     const changes: Partial<PersonInput> = {};
-    if (typeof body.displayName === 'string') changes.displayName = body.displayName.trim();
-    if (typeof body.email === 'string') changes.email = body.email.trim();
+    // Empty is refused, not stored: `updatePerson` treats '' as a real value
+    // (it is not nullish), so a blanked email would silently destroy the only
+    // way that person can ever sign in.
+    if (typeof body.displayName === 'string') {
+      const displayName = body.displayName.trim();
+      if (!displayName) return NextResponse.json({ error: '姓名不可為空' }, { status: 400 });
+      changes.displayName = displayName;
+    }
+    if (typeof body.email === 'string') {
+      const email = body.email.trim();
+      if (!email) return NextResponse.json({ error: 'Email 不可為空' }, { status: 400 });
+      changes.email = email;
+    }
     if (body.redcapUsername !== undefined) {
       changes.redcapUsername = typeof body.redcapUsername === 'string' && body.redcapUsername.trim()
         ? body.redcapUsername.trim()
@@ -106,7 +123,12 @@ export async function PATCH(request: Request) {
       changes.labelerCode = Number.isInteger(body.labelerCode) ? body.labelerCode : null;
     }
     const roles = parseRoles(body.roles);
-    if (roles) changes.roles = roles;
+    if (roles) {
+      if (roles.length === 0) {
+        return NextResponse.json({ error: '至少要給一個角色' }, { status: 400 });
+      }
+      changes.roles = roles;
+    }
     if (typeof body.broadcastOptOut === 'boolean') changes.broadcastOptOut = body.broadcastOptOut;
     if (typeof body.notifyPref === 'string') changes.notifyPref = body.notifyPref;
     if (typeof body.active === 'boolean') changes.active = body.active;

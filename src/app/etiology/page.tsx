@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Lock, Unlock, Mail, Calendar, AlertTriangle, Check, X, HelpCircle, Upload, Sparkles } from 'lucide-react';
 import { ETIOLOGY_FINAL_MAP, CAUSE_CODE_GROUPS, causeCodeToFinalCode } from '@/lib/redcap/etiology-transform';
+import { logoutAdmin } from '@/lib/logout';
 import type { ConsensusStatus, EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 const PAGE_SIZE = 50;
@@ -132,7 +133,7 @@ export default function EtiologyPage() {
   }, [password]);
 
   const handleLogout = useCallback(async () => {
-    await fetch('/api/auth', { method: 'DELETE' });
+    await logoutAdmin();
     setAdminMode(false);
     setViewMode('tracking');
   }, []);

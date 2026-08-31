@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { get, put } from '@vercel/blob';
-import { requireRole } from '@/lib/auth/identity';
+import { requireRole, identityLabel } from '@/lib/auth/identity';
 import { recordAudit } from '@/lib/db/audit';
 import type { ScreeningReview } from '@/types';
 
@@ -56,9 +56,7 @@ export async function POST(request: NextRequest) {
     reviewedAt: new Date().toISOString(),
     decidedBy: {
       personId: auth.identity.personId,
-      label: 'personId' in auth.identity.actor
-        ? auth.identity.actor.personId
-        : auth.identity.actor.tokenName,
+      label: identityLabel(auth.identity),
     },
   };
 

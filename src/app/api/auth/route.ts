@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { ADMIN_COOKIE_NAME, expectedAdminToken } from '@/lib/auth';
-import { getIdentity } from '@/lib/auth/identity';
+import { cookies } from 'next/headers';
+import { ADMIN_COOKIE_NAME, expectedAdminToken, legacyAuthEnabled } from '@/lib/auth';
+import { resolveIdentity } from '@/lib/auth/identity';
 import { SESSION_COOKIE_NAME, satisfiesRole } from '@/lib/auth/session';
 
 /**
@@ -16,6 +17,14 @@ const TOKEN_NAME = ADMIN_COOKIE_NAME;
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
+
+    if (!legacyAuthEnabled()) {
+      return NextResponse.json(
+        { error: '共用密碼已停用，請改用 email 登入連結' },
+        { status: 410 },
+      );
+    }
+
     const adminPassword = process.env.ADMIN_PASSWORD || '';
 
     if (!adminPassword) {
@@ -44,18 +53,26 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const identity = await getIdentity();
+  const identity = await resolveIdentity();
   const authenticated = !!identity && satisfiesRole(identity.roles, 'manager');
   return NextResponse.json({ authenticated });
 }
 
 /**
- * Sign out. Drops the individual session too, not just the shared admin
- * cookie — otherwise 登出 does nothing at all for someone who signed in with a
- * magic link, which is worse than logging them out further than they expected.
+ * Sign out.
+ *
+ * Drops the individual session as well as the shared admin cookie — otherwise
+ * 登出 does nothing at all for someone who signed in with a magic link. That
+ * makes the button mean two different things depending on how you signed in,
+ * so the answer says which happened: `sessionCleared` means the caller is now
+ * signed out of the whole dashboard and should go to /login, rather than sit on
+ * a page it can no longer load.
  */
 export async function DELETE() {
-  const response = NextResponse.json({ ok: true });
+  const jar = await cookies();
+  const sessionCleared = !!jar.get(SESSION_COOKIE_NAME)?.value;
+
+  const response = NextResponse.json({ ok: true, sessionCleared });
   response.cookies.delete(TOKEN_NAME);
   response.cookies.delete(SESSION_COOKIE_NAME);
   return response;

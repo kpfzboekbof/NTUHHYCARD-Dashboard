@@ -20,8 +20,8 @@ export interface PlannedCreate {
 }
 
 export interface PlannedUpdate {
-  id: string;
-  displayName: string;
+  /** The row as it stands, so applying the plan needs no second read. */
+  current: Person;
   changes: Partial<PersonInput>;
 }
 
@@ -84,7 +84,7 @@ export function planImport(users: RawUser[], existing: Person[]): ImportPlan {
       if (byName.displayName !== displayName) changes.displayName = displayName;
       if (normalizeEmail(byName.email) !== key) changes.email = email;
       if (Object.keys(changes).length > 0) {
-        plan.update.push({ id: byName.id, displayName: byName.displayName, changes });
+        plan.update.push({ current: byName, changes });
       }
       claimedEmails.add(key);
       continue;
@@ -100,8 +100,7 @@ export function planImport(users: RawUser[], existing: Person[]): ImportPlan {
         continue;
       }
       plan.update.push({
-        id: byMail.id,
-        displayName: byMail.displayName,
+        current: byMail,
         changes: { redcapUsername: username, displayName },
       });
       claimedEmails.add(key);

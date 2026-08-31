@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireRole } from '@/lib/auth/identity';
 import { hasDatabase } from '@/lib/db/client';
 import { fetchUsers } from '@/lib/redcap/client';
-import { createPerson, listPeople, updatePerson } from '@/lib/people/repo';
+import { createPeople, createPerson, listPeople, updatePerson } from '@/lib/people/repo';
 import { planImport, type ImportPlan } from '@/lib/people/import-redcap';
 
 /**
@@ -41,31 +41,41 @@ export async function POST(request: Request) {
       });
     }
 
-    // One person at a time: each write carries its own audit row, and a single
-    // bad row (a duplicate email REDCap allows and this schema does not) should
-    // not discard the rest of the import.
     const failed: { username: string; reason: string }[] = [];
+
+    // The whole batch in one transaction — dozens of round trips would run past
+    // a serverless function's budget and could leave the registry half
+    // populated. If one row is rejected (a duplicate email REDCap allows and
+    // this schema does not), retry the rest one at a time to find out which.
     let created = 0;
-    for (const item of plan.create) {
-      try {
-        await createPerson(item.input, auth.identity.actor);
-        created++;
-      } catch (error) {
-        failed.push({
-          username: item.input.redcapUsername ?? item.input.email,
-          reason: error instanceof Error ? error.message : 'Unknown error',
-        });
+    const inputs = plan.create.map(item => item.input);
+    try {
+      created = (await createPeople(inputs, auth.identity.actor)).length;
+    } catch {
+      created = 0;
+      for (const input of inputs) {
+        try {
+          await createPerson(input, auth.identity.actor);
+          created++;
+        } catch (error) {
+          failed.push({
+            username: input.redcapUsername ?? input.email,
+            reason: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
       }
     }
 
+    // Updates stay one at a time: there are few of them after the first import,
+    // and each carries the row it is changing, so no extra read.
     let updated = 0;
     for (const item of plan.update) {
       try {
-        await updatePerson(item.id, item.changes, auth.identity.actor);
+        await updatePerson(item.current.id, item.changes, auth.identity.actor, item.current);
         updated++;
       } catch (error) {
         failed.push({
-          username: item.displayName,
+          username: item.current.displayName,
           reason: error instanceof Error ? error.message : 'Unknown error',
         });
       }

@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { USER_COOKIE_NAME, expectedUserToken, isValidUserToken } from '@/lib/auth';
+import {
+  USER_COOKIE_NAME, expectedUserToken, isValidUserToken, legacyAuthEnabled,
+} from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
     const { password } = await request.json();
+
+    // Without this the endpoint keeps handing out cookies the proxy no longer
+    // accepts, and the login page loops on a correct password with no error.
+    if (!legacyAuthEnabled()) {
+      return NextResponse.json(
+        { error: '共用密碼已停用，請改用 email 登入連結' },
+        { status: 410 },
+      );
+    }
+
     const userPw = process.env.USER_PASSWORD || '';
 
     if (!userPw) {

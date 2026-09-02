@@ -32,7 +32,7 @@ export interface BacklogSnapshot {
  * REDCap username → name, shared with the matrix route's cache entry so the
  * two views name the same person the same way and pay for one export.
  */
-async function redcapDirectory(): Promise<Map<string, string>> {
+export async function redcapDirectory(): Promise<Map<string, string>> {
   let users = await getCachedAsync<Array<{ username: string; name: string }>>('redcap_users');
   if (!users) {
     try {

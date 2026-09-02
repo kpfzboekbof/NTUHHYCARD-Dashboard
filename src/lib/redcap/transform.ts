@@ -5,6 +5,7 @@ import type {
   OwnerProductivity, OwnerFormProgress, WeeklyTimeline,
   CompletionStatus, OwnerAssignments, User,
 } from '@/types';
+import { parseRedcapTimestamp, taipeiDay } from './timestamp';
 import type { RawCompletionRecord, RawLogEntry } from './types';
 
 const UNASSIGNED = '未指派';
@@ -199,33 +200,32 @@ export function calcLoggingStats(
     return { byOwner: [], byOwnerForm: [], timeline: [] };
   }
 
-  // Build reverse map: owner display name → username
-  const nameToUsername = new Map<string, string>();
-  for (const [formName, username] of Object.entries(assignments)) {
-    const name = resolveOwner(formName, assignments, users);
-    if (name !== UNASSIGNED && !nameToUsername.has(name)) {
-      nameToUsername.set(name, username);
-    }
-  }
-
-  // Build username → display name map for timeline
+  // username → display name, the direction REDCap's own data supports.
+  //
+  // The reverse map this replaces turned a display name back into one username
+  // and kept whichever it happened to see first, so a person holding two REDCap
+  // accounts had one of them silently dropped from their numbers — 熊墨樺 has
+  // exactly that (g07470 and mohua0820). Going forwards only, both accounts
+  // resolve to the same name and their entries add up.
   const usernameToName = new Map<string, string>();
   for (const u of users) {
     usernameToName.set(u.username, u.name);
   }
+  const displayNameOf = (username: string) => usernameToName.get(username) || username;
 
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setMonth(cutoff.getMonth() - monthsBack);
 
-  // Per-user log stats (keyed by username)
-  const userStats = new Map<string, { count: number; lastEntry: Date }>();
+  // Log stats per owner, summed over every account that owner holds.
+  const ownerStats = new Map<string, { count: number; lastEntry: Date }>();
   for (const log of logs) {
-    const ts = new Date(log.timestamp);
-    if (ts < cutoff) continue;
-    const u = userStats.get(log.username);
+    const ts = parseRedcapTimestamp(log.timestamp);
+    if (!ts || ts < cutoff) continue;
+    const name = displayNameOf(log.username);
+    const u = ownerStats.get(name);
     if (!u) {
-      userStats.set(log.username, { count: 1, lastEntry: ts });
+      ownerStats.set(name, { count: 1, lastEntry: ts });
     } else {
       u.count++;
       if (ts > u.lastEntry) u.lastEntry = ts;
@@ -263,9 +263,7 @@ export function calcLoggingStats(
     );
     const pctComplete = totalTarget > 0 ? Math.round(totalComplete / totalTarget * 1000) / 10 : 0;
 
-    // Look up log stats by username (reverse lookup from owner display name)
-    const username = nameToUsername.get(owner);
-    const uStats = username ? userStats.get(username) : undefined;
+    const uStats = ownerStats.get(owner);
     const daysSince = uStats
       ? Math.round((now.getTime() - uStats.lastEntry.getTime()) / 86400000)
       : null;
@@ -311,11 +309,11 @@ export function calcLoggingStats(
 
   const dayMap = new Map<string, number>();
   for (const log of logs) {
-    const ts = new Date(log.timestamp);
-    if (ts < timelineCutoff) continue;
-    const day = ts.toISOString().slice(0, 10); // YYYY-MM-DD
-    const displayName = usernameToName.get(log.username) || log.username;
-    const key = `${displayName}|${day}`;
+    const ts = parseRedcapTimestamp(log.timestamp);
+    if (!ts || ts < timelineCutoff) continue;
+    // Bucketed on the Taipei day the save actually happened, not the UTC one:
+    // anything entered before 08:00 belongs to the previous UTC date.
+    const key = `${displayNameOf(log.username)}|${taipeiDay(ts)}`;
     dayMap.set(key, (dayMap.get(key) || 0) + 1);
   }
 

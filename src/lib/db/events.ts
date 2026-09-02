@@ -110,3 +110,37 @@ export async function recentHandoffKeys(since: string): Promise<Set<string>> {
   );
   return new Set((rows as Record<string, string>[]).map(r => `${r.study_id}|${r.unit_id}`));
 }
+
+/**
+ * When each cell most recently became ready, oldest first.
+ *
+ * Feeds `oldestReadyDays` — the signal that separates somebody genuinely
+ * behind from somebody who was handed a new form last week. Rows for cells
+ * since finished are harmless: the progress model only looks up cells that are
+ * ready right now.
+ *
+ * The cap is ordered oldest-first on purpose. Dropping the newest rows can only
+ * ever hide an age smaller than every age it kept, so the maximum this feeds is
+ * unaffected for anyone with a cell in the window; someone whose entire queue is
+ * newer than the cut simply has no age, which softens a grade and never hardens
+ * one.
+ */
+export async function readySinceByCell(limit = 100_000): Promise<Map<string, string>> {
+  if (!hasDatabase()) return new Map();
+  const sql = getSql();
+  const rows = await sql.query(
+    `SELECT study_id, unit_id, max(ts) AS became_ready
+       FROM work_event
+      WHERE event_type = 'became_ready'
+      GROUP BY study_id, unit_id
+      ORDER BY max(ts) ASC
+      LIMIT $1`,
+    [limit],
+  );
+  return new Map(
+    (rows as Record<string, unknown>[]).map(row => [
+      `${row.study_id}|${row.unit_id}`,
+      new Date(row.became_ready as string).toISOString(),
+    ]),
+  );
+}

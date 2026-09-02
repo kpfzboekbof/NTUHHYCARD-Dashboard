@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { Lock, Plus, Send, Eye, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Plus, Send, Eye, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { AdminGate } from '@/components/admin-gate';
 import { deadlinePhrase } from '@/lib/deadline';
 
 /**
@@ -72,65 +73,6 @@ const fetcher = async (url: string) => {
 
 function taipeiDay(iso: string): string {
   return new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit' });
-}
-
-function AdminGate({ children }: { children: React.ReactNode }) {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/auth').then(r => r.json()).then(d => setAuthenticated(!!d.authenticated)).catch(() => setAuthenticated(false));
-  }, []);
-
-  const handleLogin = useCallback(async () => {
-    setAuthLoading(true);
-    setAuthError('');
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const data = await res.json();
-      if (res.ok) setAuthenticated(true);
-      else setAuthError(data.error || '登入失敗');
-    } finally {
-      setAuthLoading(false);
-    }
-  }, [password]);
-
-  if (authenticated === null) {
-    return <div className="flex h-screen items-center justify-center text-zinc-500">驗證中...</div>;
-  }
-  if (!authenticated) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <Card className="w-80">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Lock className="h-5 w-5" />管理員登入</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="space-y-4" onSubmit={e => { e.preventDefault(); handleLogin(); }}>
-              <input
-                type="password"
-                className="w-full rounded border px-3 py-2 text-sm"
-                placeholder="管理者密碼"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-              {authError && <p className="text-sm text-red-600">{authError}</p>}
-              <Button type="submit" className="w-full" disabled={authLoading}>
-                {authLoading ? '登入中...' : '登入'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-  return <>{children}</>;
 }
 
 function NewBatchForm({ units, onCreated }: { units: UnitRef[]; onCreated: () => void }) {

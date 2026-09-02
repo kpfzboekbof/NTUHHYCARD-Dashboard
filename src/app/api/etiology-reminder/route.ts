@@ -6,9 +6,12 @@ import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { signRsvp } from '@/lib/rsvp-token';
-import { createTransporter, resolveBaseUrl } from '@/lib/mailer';
+import { resolveBaseUrl } from '@/lib/mailer';
+import { sendTrackedMail } from '@/lib/mail/send';
+import { resolveLabelerTargets } from '@/lib/people/labeler-targets';
 import { requireRole } from '@/lib/auth/identity';
 import { recordAudit } from '@/lib/db/audit';
+import { lastReminderByLabelerCode } from '@/lib/db/outbound-mail';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
 
 /** Filter incomplete records by ID range */
@@ -22,10 +25,11 @@ function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo:
 /** GET — reminder status: per-labeler incomplete counts + meeting settings */
 export async function GET() {
   try {
-    const [labelers, rawRows, settings] = await Promise.all([
+    const [labelers, rawRows, settings, lastReminder] = await Promise.all([
       getLabelers(),
       fetchEtiologyStatus(),
       getMeetingSettings(),
+      lastReminderByLabelerCode().catch(() => ({} as Record<string, string>)),
     ]);
 
     const { records } = transformEtiology(rawRows, labelers);
@@ -48,6 +52,8 @@ export async function GET() {
         incompleteCount: incompleteCases.length,
         incompleteCaseIds: incompleteCases.map(r => r.studyId),
         rsvp,
+        // When this labeler was last actually reminded, from the mail ledger.
+        lastReminderAt: lastReminder[String(l.code)] ?? null,
       };
     });
 
@@ -95,13 +101,6 @@ export async function POST(request: NextRequest) {
 
     // Send reminder emails
     if (body.action === 'sendReminder') {
-      const transporter = createTransporter();
-      if (!transporter) {
-        return NextResponse.json({ error: '未設定 GMAIL_USER 或 GMAIL_APP_PASSWORD 環境變數' }, { status: 500 });
-      }
-
-      const fromEmail = process.env.GMAIL_USER!;
-
       const [labelers, rawRows, settings] = await Promise.all([
         getLabelers(),
         fetchEtiologyStatus(),
@@ -121,51 +120,72 @@ export async function POST(request: NextRequest) {
       // Optional: only send to specific labeler codes
       const targetCodes: number[] | undefined = body.labelerCodes;
 
+      // The registry's email wins over the copy stored beside the labeler code;
+      // until a code is linked in /admin/people the old address still works.
+      const targets = await resolveLabelerTargets(labelers);
+
       const results: Array<{ name: string; email: string; count: number; success: boolean; error?: string }> = [];
 
-      for (const labeler of labelers) {
-        if (!labeler.email) continue;
-        if (targetCodes && !targetCodes.includes(labeler.code)) continue;
+      for (const target of targets) {
+        if (!target.email) continue;
+        if (targetCodes && !targetCodes.includes(target.code)) continue;
 
         const incompleteCases = incompleteRecords.filter(
-          r => !r.reviewers.find(rev => rev.labelerCode === labeler.code)?.complete,
+          r => !r.reviewers.find(rev => rev.labelerCode === target.code)?.complete,
         );
 
         // Send the email even when 0 cases remain — the recipient still needs
         // the RSVP buttons. The template switches copy based on the count.
 
         const { subject, html } = buildReminderEmail(
-          labeler.name,
+          target.name,
           settings.meetingDate,
           incompleteCases.map(r => r.studyId),
           { from: settings.idFrom, to: settings.idTo },
           {
             baseUrl,
-            labelerCode: labeler.code,
-            signature: signRsvp(labeler.code, settings.meetingDate),
+            labelerCode: target.code,
+            signature: signRsvp(target.code, settings.meetingDate),
           },
           redcapBaseUrl,
         );
 
-        try {
-          await transporter.sendMail({
-            from: fromEmail,
-            to: labeler.email,
-            subject,
-            html,
-          });
-          results.push({ name: labeler.name, email: labeler.email, count: incompleteCases.length, success: true });
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : 'Send failed';
-          results.push({ name: labeler.name, email: labeler.email, count: incompleteCases.length, success: false, error: errMsg });
-        }
+        const result = await sendTrackedMail({
+          toPersonId: target.personId,
+          toEmail: target.email,
+          kind: 'meeting_reminder',
+          subject,
+          html,
+          // labelerCode is in the payload so per-labeler reminder history is
+          // answerable even for codes with no person row to key on.
+          payload: {
+            meetingDate: settings.meetingDate,
+            labelerCode: target.code,
+            incomplete: incompleteCases.length,
+            idRange: { from: settings.idFrom, to: settings.idTo },
+          },
+          requestedBy: auth.identity.personId,
+        });
+
+        results.push({
+          name: target.name,
+          email: target.email,
+          count: incompleteCases.length,
+          success: result.ok,
+          ...(result.error ? { error: result.error } : {}),
+        });
       }
 
-      // Record when reminder was sent. Sending takes seconds, so write just
-      // this field back rather than the settings we read before the send loop —
-      // an RSVP that arrived meanwhile would otherwise be erased.
+      // Only claim a reminder went out when one actually did. The old code set
+      // this unconditionally, so a run where every send failed still read as
+      // "reminded" — the single global timestamp that made failure invisible.
+      const anySent = results.some(r => r.success);
       const sentAt = new Date().toISOString();
-      await updateMeetingSettings(current => ({ ...current, reminderSentAt: sentAt }));
+      if (anySent) {
+        // Written as just this field rather than the settings read before the
+        // loop: an RSVP that arrived meanwhile would otherwise be erased.
+        await updateMeetingSettings(current => ({ ...current, reminderSentAt: sentAt }));
+      }
 
       await recordAudit({
         actor: auth.identity.actor,
@@ -173,13 +193,18 @@ export async function POST(request: NextRequest) {
         entityType: 'meeting',
         entityId: settings.meetingDate,
         after: {
-          sentAt,
+          sentAt: anySent ? sentAt : null,
           sent: results.filter(r => r.success).map(r => r.email),
-          failed: results.filter(r => !r.success).map(r => r.email),
+          failed: results.filter(r => !r.success).map(r => ({ email: r.email, error: r.error })),
         },
       });
 
-      return NextResponse.json({ ok: true, results, sentAt });
+      return NextResponse.json({
+        ok: anySent,
+        results,
+        sentAt: anySent ? sentAt : null,
+        ...(anySent ? {} : { error: '所有提醒信都寄送失敗，未更新提醒時間' }),
+      });
     }
 
     return NextResponse.json({ error: '未知的 action' }, { status: 400 });

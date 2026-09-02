@@ -114,6 +114,36 @@ export async function lastNudgeByPerson(): Promise<Map<string, string>> {
   );
 }
 
+/**
+ * When each labeler last actually received a meeting reminder.
+ *
+ * Keyed on the labeler code carried in the payload rather than on a person id,
+ * so it answers for codes that have no registry row yet — which, before anyone
+ * runs the import, is all of them. Replaces the single global timestamp that
+ * could only say "somebody was reminded at some point".
+ */
+export async function lastReminderByLabelerCode(): Promise<Record<string, string>> {
+  if (!hasDatabase()) return {};
+  const sql = getSql();
+  const rows = await sql.query(
+    // `->> IS NOT NULL` rather than the jsonb `?` operator: a bare ? is a
+    // placeholder to several Postgres drivers and gets mangled before it
+    // reaches the server.
+    `SELECT payload->>'labelerCode' AS code, max(sent_at) AS last_sent
+       FROM outbound_mail
+      WHERE kind = 'meeting_reminder'
+        AND sent_at IS NOT NULL
+        AND payload->>'labelerCode' IS NOT NULL
+      GROUP BY payload->>'labelerCode'`,
+    [],
+  );
+  return Object.fromEntries(
+    (rows as Record<string, unknown>[])
+      .filter(row => row.code !== null)
+      .map(row => [String(row.code), new Date(row.last_sent as string).toISOString()]),
+  );
+}
+
 /** Whether a mail of this kind already went out today (Asia/Taipei) — the watchdog's dedupe. */
 export async function alreadySentToday(kind: string): Promise<boolean> {
   if (!hasDatabase()) return false;

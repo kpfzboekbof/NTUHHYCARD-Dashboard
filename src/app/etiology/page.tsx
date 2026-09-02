@@ -67,6 +67,8 @@ export default function EtiologyPage() {
   const [reminderSentAt, setReminderSentAt] = useState<string | null>(null);
   const [reminderStatus, setReminderStatus] = useState<Array<{
     code: number; name: string; email: string | null; incompleteCount: number;
+    /** When this labeler was last actually reminded, from the mail ledger. */
+    lastReminderAt?: string | null;
     rsvp: { response: 'yes' | 'no'; respondedAt: string } | null;
   }>>([]);
   const [reminderLoading, setReminderLoading] = useState(false);
@@ -443,7 +445,17 @@ export default function EtiologyPage() {
                             const canSend = !!l.email && !!meetingDate;
                             return (
                               <tr key={l.code} className="border-b">
-                                <td className="px-3 py-1.5">{l.name}</td>
+                                <td className="px-3 py-1.5">
+                                  {l.name}
+                                  {l.lastReminderAt && (
+                                    <span
+                                      className="ml-2 text-xs text-zinc-400"
+                                      title={`上次提醒信寄出於 ${new Date(l.lastReminderAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`}
+                                    >
+                                      上次 {new Date(l.lastReminderAt).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit' })}
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="px-3 py-1.5 text-center">
                                   {l.incompleteCount > 0 ? (
                                     <span className="font-medium text-amber-600">{l.incompleteCount}</span>

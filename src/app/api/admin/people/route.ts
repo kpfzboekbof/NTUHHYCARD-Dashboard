@@ -9,10 +9,14 @@ import {
 /**
  * The people registry — manager only.
  *
- * This is where the three identity systems get tied together: a REDCap
- * username, an etiology labeler code and a login email on one row. The labeler
- * code in particular has no other home; REDCap knows the code, and only a human
- * knows which person it belongs to.
+ * One row ties a person's identities together: a REDCap username, a login
+ * email and, when they review etiology, that form's labeler code. Only a human
+ * knows which person a code belongs to, so somewhere has to record it.
+ *
+ * `labelerCode` is writable here but is not edited on /admin/people: that page
+ * is the project roster and one form's dropdown is not its business. The link
+ * is made on /etiology beside the labelers it names, through this same PATCH,
+ * so the person row stays the single place it is stored.
  */
 
 export const runtime = 'nodejs';

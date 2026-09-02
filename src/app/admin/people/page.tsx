@@ -9,18 +9,22 @@ import { Button } from '@/components/ui/button';
 import { ALL_ROLES, ROLE_LABELS, type Role } from '@/lib/auth/roles';
 
 /**
- * The people registry.
+ * The people registry — who the form owners are, across the whole project.
  *
- * This page exists because the labeler code (0/3/5/6/7 in the etiology form)
- * lives only in REDCap's dropdown and in people's heads — nothing could link it
- * to a REDCap account or an email. Linking them here is what lets every other
- * view stop matching people by display-name string.
+ * A person here is a name, a REDCap account, an address and a set of roles.
+ * That is what every other view needs to stop matching people by display-name
+ * string, and it is all this page owns.
+ *
+ * The etiology labeler code (0/3/5/6/7) is deliberately not here: it belongs to
+ * one form's dropdown, not to the project's roster, and is linked on /etiology
+ * beside the labelers it names. `person.labeler_code` still stores it — this
+ * page simply never sends the field, so editing somebody here cannot disturb
+ * a link made there.
  */
 
 interface Person {
   id: string;
   redcapUsername: string | null;
-  labelerCode: number | null;
   displayName: string;
   email: string;
   roles: Role[];
@@ -123,7 +127,6 @@ export default function PeoplePage() {
           displayName: draft.displayName,
           email: draft.email,
           redcapUsername: draft.redcapUsername,
-          labelerCode: draft.labelerCode,
           roles: draft.roles,
           broadcastOptOut: draft.broadcastOptOut,
           active: draft.active,
@@ -253,7 +256,6 @@ export default function PeoplePage() {
                     <th className="p-2">姓名</th>
                     <th className="p-2">Email</th>
                     <th className="p-2">REDCap 帳號</th>
-                    <th className="p-2">Labeler 代碼</th>
                     <th className="p-2">角色</th>
                     <th className="p-2">不收群組信</th>
                     <th className="p-2">啟用</th>
@@ -292,19 +294,6 @@ export default function PeoplePage() {
                               onChange={e => setDraft({ ...row, redcapUsername: e.target.value || null })}
                             />
                           ) : (row.redcapUsername ?? <span className="text-zinc-400">—</span>)}
-                        </td>
-                        <td className="p-2">
-                          {editing ? (
-                            <input
-                              type="number"
-                              className="w-20 rounded border px-2 py-1"
-                              value={row.labelerCode ?? ''}
-                              onChange={e => setDraft({
-                                ...row,
-                                labelerCode: e.target.value === '' ? null : Number(e.target.value),
-                              })}
-                            />
-                          ) : (row.labelerCode ?? <span className="text-zinc-400">—</span>)}
                         </td>
                         <td className="p-2">
                           {editing ? (

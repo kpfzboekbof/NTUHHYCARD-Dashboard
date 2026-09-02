@@ -69,8 +69,25 @@ export default function EtiologyPage() {
     code: number; name: string; email: string | null; incompleteCount: number;
     /** When this labeler was last actually reminded, from the mail ledger. */
     lastReminderAt?: string | null;
+    /** The registry person carrying this labeler code, when one does. */
+    personId?: string | null;
+    fromRegistry?: boolean;
     rsvp: { response: 'yes' | 'no'; respondedAt: string } | null;
   }>>([]);
+
+  /**
+   * The registry rows a labeler code can be linked to.
+   *
+   * The code itself belongs to one form's dropdown, so it is linked here rather
+   * than on /admin/people: that page is the project roster and has no business
+   * knowing about etiology. Linking is what lets a reminder go to the address
+   * the registry curates instead of the copy kept beside the code.
+   */
+  const [registryPeople, setRegistryPeople] = useState<Array<{
+    id: string; displayName: string; email: string; labelerCode: number | null;
+  }>>([]);
+  const [linking, setLinking] = useState<number | false>(false);
+  const [linkError, setLinkError] = useState('');
   const [reminderLoading, setReminderLoading] = useState(false);
   const [sendingReminder, setSendingReminder] = useState<number | 'all' | false>(false);
   const [sendResult, setSendResult] = useState<Record<number, {
@@ -82,6 +99,16 @@ export default function EtiologyPage() {
     fetch('/api/auth').then(r => r.json()).then(d => {
       if (d.authenticated) setAdminMode(true);
     });
+  }, []);
+
+  const fetchRegistryPeople = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/people');
+      const d = await res.json();
+      if (res.ok) setRegistryPeople(d.people ?? []);
+    } catch {
+      // Losing the roster costs the linking dropdown, never the reminder list.
+    }
   }, []);
 
   // Fetch reminder status when admin mode is active
@@ -102,9 +129,44 @@ export default function EtiologyPage() {
     }
   }, []);
 
+  /**
+   * Point a labeler code at a person, or clear it.
+   *
+   * `labeler_code` is UNIQUE, so moving a code to somebody else has to release
+   * the previous holder first — otherwise the write fails on the constraint and
+   * the operator sees a raw Postgres error for what is an ordinary reassignment.
+   */
+  const handleLinkLabeler = useCallback(async (code: number, personId: string) => {
+    setLinking(code);
+    setLinkError('');
+    try {
+      const patch = (id: string, labelerCode: number | null) => fetch('/api/admin/people', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, labelerCode }),
+      }).then(async res => {
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      });
+
+      const previous = registryPeople.find(p => p.labelerCode === code);
+      if (previous && previous.id !== personId) await patch(previous.id, null);
+      if (personId) await patch(personId, code);
+
+      await Promise.all([fetchRegistryPeople(), fetchReminderStatus()]);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLinking(false);
+    }
+  }, [registryPeople, fetchRegistryPeople, fetchReminderStatus]);
+
   useEffect(() => {
-    if (adminMode) fetchReminderStatus();
-  }, [adminMode, fetchReminderStatus]);
+    if (adminMode) {
+      fetchReminderStatus();
+      fetchRegistryPeople();
+    }
+  }, [adminMode, fetchReminderStatus, fetchRegistryPeople]);
 
   useEffect(() => {
     if (showLoginModal) {
@@ -428,11 +490,15 @@ export default function EtiologyPage() {
                           </div>
                         );
                       })()}
+                      {linkError && (
+                        <p className="text-xs text-red-600">連結人員失敗：{linkError}</p>
+                      )}
                       <div className="overflow-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b text-left text-zinc-500">
                             <th className="px-3 py-2">Labeler</th>
+                            <th className="px-3 py-2">對應人員（信箱來源）</th>
                             <th className="px-3 py-2 text-center">未完成數</th>
                             <th className="px-3 py-2 text-center">出席 RSVP</th>
                             <th className="px-3 py-2 text-center">發送提醒</th>
@@ -455,6 +521,28 @@ export default function EtiologyPage() {
                                       上次 {new Date(l.lastReminderAt).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit' })}
                                     </span>
                                   )}
+                                </td>
+                                <td className="px-3 py-1.5">
+                                  <select
+                                    className="max-w-48 rounded border px-1.5 py-0.5 text-xs disabled:opacity-50"
+                                    value={l.personId ?? ''}
+                                    disabled={linking !== false}
+                                    onChange={e => handleLinkLabeler(l.code, e.target.value)}
+                                  >
+                                    <option value="">未連結</option>
+                                    {registryPeople.map(person => (
+                                      <option key={person.id} value={person.id}>
+                                        {person.displayName}（{person.email}）
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div className="mt-0.5 text-xs text-zinc-400">
+                                    {l.fromRegistry
+                                      ? '用人員名單的信箱'
+                                      : l.email
+                                        ? `用舊設定：${l.email}`
+                                        : '沒有信箱，寄不出去'}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-1.5 text-center">
                                   {l.incompleteCount > 0 ? (

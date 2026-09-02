@@ -22,8 +22,16 @@ function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo:
   return result;
 }
 
-/** GET — reminder status: per-labeler incomplete counts + meeting settings */
+/**
+ * GET — reminder status: per-labeler incomplete counts + meeting settings.
+ *
+ * Manager-only: it carries the addresses a reminder would go to and the
+ * registry rows behind them.
+ */
 export async function GET() {
+  const auth = await requireRole('manager');
+  if (!auth.ok) return auth.response;
+
   try {
     const [labelers, rawRows, settings, lastReminder] = await Promise.all([
       getLabelers(),
@@ -31,6 +39,12 @@ export async function GET() {
       getMeetingSettings(),
       lastReminderByLabelerCode().catch(() => ({} as Record<string, string>)),
     ]);
+
+    // The same resolution the send performs, so the address shown here and the
+    // address a reminder actually leaves for cannot disagree.
+    const targetByCode = new Map(
+      (await resolveLabelerTargets(labelers)).map(target => [target.code, target]),
+    );
 
     const { records } = transformEtiology(rawRows, labelers);
     const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
@@ -45,10 +59,15 @@ export async function GET() {
       const rsvp = stored && settings.meetingDate && stored.meetingDate === settings.meetingDate
         ? { response: stored.response, respondedAt: stored.respondedAt }
         : null;
+      const target = targetByCode.get(l.code);
       return {
         code: l.code,
-        name: l.name,
-        email: l.email || null,
+        name: target?.name ?? l.name,
+        email: target?.email ?? null,
+        /** Set when a registry person carries this labeler code. */
+        personId: target?.personId ?? null,
+        /** True when the address came from the registry, not the labeler store. */
+        fromRegistry: target?.fromRegistry ?? false,
         incompleteCount: incompleteCases.length,
         incompleteCaseIds: incompleteCases.map(r => r.studyId),
         rsvp,

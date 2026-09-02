@@ -122,6 +122,34 @@ test('an empty unit list means every unit, so a batch needs only an id and a dat
   assert.equal(backlog[0].units.length, 2);
 });
 
+test('a name comes from the registry first, the REDCap directory second, the raw username last', () => {
+  const directory = new Map([['ALICE', '目錄裡的王小明'], ['CAROL', '林小美']]);
+  const backlog = computeBacklog({
+    units: [...UNITS, { unitId: 'unit.c', label: 'C 表', deepLinkPage: 'page_c' }],
+    assignments: { 'unit.a': 'ALICE', 'unit.b': 'CAROL', 'unit.c': 'NOBODY' },
+    people: [ALICE],
+    directory,
+    records: [record('1', [
+      { unitId: 'unit.a', state: 'ready' },
+      { unitId: 'unit.b', state: 'ready' },
+      { unitId: 'unit.c', state: 'ready' },
+    ])],
+  });
+
+  const byUsername = new Map(backlog.map(p => [p.username, p]));
+  // A registry row wins over the directory: it is the name a human curated.
+  assert.equal(byUsername.get('ALICE')!.displayName, '王小明');
+  assert.equal(byUsername.get('ALICE')!.nameSource, 'registry');
+  // Known to REDCap but never imported: show the real name, no address.
+  assert.equal(byUsername.get('CAROL')!.displayName, '林小美');
+  assert.equal(byUsername.get('CAROL')!.nameSource, 'directory');
+  assert.equal(byUsername.get('CAROL')!.email, null);
+  // REDCap has no such account — the assignment itself is stale, and no
+  // import will ever fix it.
+  assert.equal(byUsername.get('NOBODY')!.displayName, 'NOBODY');
+  assert.equal(byUsername.get('NOBODY')!.nameSource, 'unknown');
+});
+
 test('an assignment naming an unlinked username still counts, but has nobody to mail', () => {
   // The work is real and the operator must see it; the registry link is what
   // is missing, and reporting zero would hide the backlog entirely.

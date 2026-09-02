@@ -21,6 +21,7 @@ const BACKLOG: PersonBacklog = {
   personId: 'p1',
   username: 'ALICE',
   displayName: '王小明',
+  nameSource: 'registry',
   email: 'alice@ntuh.gov.tw',
   units: [
     { unitId: 'u.a', label: 'Core 助理', deepLinkPage: 'ntuh_nhi_core', ready: ['101', '102'], awaiting: [] },

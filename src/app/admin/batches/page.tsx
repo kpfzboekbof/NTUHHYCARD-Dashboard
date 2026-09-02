@@ -23,6 +23,7 @@ interface PersonBacklog {
   personId: string | null;
   username: string;
   displayName: string;
+  nameSource: 'registry' | 'directory' | 'unknown';
   email: string | null;
   units: Array<{ unitId: string; label: string; ready: string[]; awaiting: string[] }>;
   readyCount: number;
@@ -221,6 +222,37 @@ function NewBatchForm({ units, onCreated }: { units: UnitRef[]; onCreated: () =>
   );
 }
 
+/**
+ * Nobody can be mailed until the registry has been seeded, and the page must
+ * say so once at the top rather than leaving a column of orange markers for
+ * the operator to decode.
+ */
+function ReachabilityHint({ batches }: { batches: BatchWithProgress[] }) {
+  const everyone = batches.flatMap(b => b.backlog);
+  if (everyone.length === 0) return null;
+
+  const notImported = new Set(everyone.filter(p => p.nameSource === 'directory').map(p => p.username));
+  const stale = new Set(everyone.filter(p => p.nameSource === 'unknown').map(p => p.username));
+  if (notImported.size === 0 && stale.size === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+      {notImported.size > 0 && (
+        <p>
+          <strong>{notImported.size} 位負責人還不能寄信</strong>：REDCap 知道他們是誰，但還沒匯入人員登記表，所以沒有 email。
+          到 <a className="underline" href="/admin/people">人員登記</a> 按「從 REDCap 匯入」即可，一次匯完。
+        </p>
+      )}
+      {stale.size > 0 && (
+        <p>
+          <strong>{stale.size} 筆指派已失效</strong>（{[...stale].join('、')}）：REDCap 的使用者清單裡沒有這些帳號，
+          匯入也救不了。請到 <a className="underline" href="/assign">管理者</a> 改指派給現任的人。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function BatchCard({ batch, lastNudge, onChanged }: {
   batch: BatchWithProgress;
   lastNudge: Record<string, string>;
@@ -325,9 +357,25 @@ function BatchCard({ batch, lastNudge, onChanged }: {
                   <tr key={person.username} className="border-b last:border-0">
                     <td className="p-2 pl-0">
                       {person.displayName}
-                      {!person.personId && (
-                        <span className="ml-1 text-xs text-amber-600" title="這個 REDCap 帳號還沒連結到人員登記表，無法寄信">
-                          （未連結）
+                      {person.nameSource === 'directory' && (
+                        <span
+                          className="ml-1 text-xs text-amber-600"
+                          title={`${person.username} 在 REDCap 有這個人，但還沒匯入人員登記表，所以沒有 email 可以寄`}
+                        >
+                          （未匯入）
+                        </span>
+                      )}
+                      {person.nameSource === 'unknown' && (
+                        <span
+                          className="ml-1 text-xs text-red-600"
+                          title="REDCap 的使用者清單裡沒有這個帳號——這筆指派已經失效，請到 /assign 改指派給現任的人"
+                        >
+                          （REDCap 查無此帳號）
+                        </span>
+                      )}
+                      {person.nameSource === 'registry' && !person.email && (
+                        <span className="ml-1 text-xs text-amber-600" title="人員資料沒有 email，無法寄信">
+                          （缺 email）
                         </span>
                       )}
                     </td>
@@ -456,6 +504,8 @@ function BatchesView() {
         </p>
 
         <NewBatchForm units={units} onCreated={() => mutate()} />
+
+        {data && <ReachabilityHint batches={data.batches} />}
 
         {error && <p className="text-sm text-red-600">讀取失敗：{String(error.message ?? error)}</p>}
         {isLoading && <p className="text-sm text-zinc-500">計算各批次進度中...（需要推導狀態矩陣，約一分鐘）</p>}

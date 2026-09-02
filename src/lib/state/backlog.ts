@@ -1,6 +1,9 @@
-import { LEGACY_FORM_BY_UNIT_ID } from '@/lib/catalog/seed';
+import { indexByUsername, ownersForUnits, resolveOwner } from './ownership';
+import type { NameSource, PersonRef } from './ownership';
 import type { RecordDerivation } from './types';
 import type { OwnerAssignments } from '@/types';
+
+export type { NameSource, PersonRef };
 
 /**
  * Who still owes what.
@@ -28,17 +31,6 @@ export interface UnitBacklog extends UnitRef {
   awaiting: string[];
 }
 
-/**
- * Where this person's name came from, which is also how reachable they are.
- *
- * - `registry`: a person row — has an email, can be mailed.
- * - `directory`: REDCap knows the account and its owner's name, but nobody has
- *   imported them into the registry yet, so there is no address to mail.
- * - `unknown`: the assignment names an account REDCap itself does not have.
- *   No import will ever fix this; the assignment is stale.
- */
-export type NameSource = 'registry' | 'directory' | 'unknown';
-
 export interface PersonBacklog {
   /** Null when the assignment names a REDCap username no person row matches. */
   personId: string | null;
@@ -58,15 +50,6 @@ export interface BacklogScope {
   studyIdCutoff?: number | null;
   /** Only these units. Empty or absent means every unit in the matrix. */
   unitIds?: string[];
-}
-
-/** The person-registry facts this needs; a subset of `Person`. */
-export interface PersonRef {
-  id: string;
-  redcapUsername: string | null;
-  displayName: string;
-  email: string;
-  active: boolean;
 }
 
 export interface BacklogInput {
@@ -101,21 +84,12 @@ export function computeBacklog(input: BacklogInput): PersonBacklog[] {
   const { records, units, assignments, people, directory, scope = {} } = input;
   const { studyIdCutoff = null, unitIds } = scope;
 
-  const personByUsername = new Map<string, PersonRef>();
-  for (const person of people) {
-    if (person.redcapUsername && person.active) personByUsername.set(person.redcapUsername, person);
-  }
+  const personByUsername = indexByUsername(people);
 
   // unitId → the REDCap username it is assigned to, for units in scope only.
-  const ownerByUnit = new Map<string, string>();
-  const unitById = new Map<string, UnitRef>();
-  for (const unit of units) {
-    if (!unitInScope(unit.unitId, unitIds)) continue;
-    const username = assignments[LEGACY_FORM_BY_UNIT_ID[unit.unitId] ?? unit.unitId];
-    if (!username) continue;
-    ownerByUnit.set(unit.unitId, username);
-    unitById.set(unit.unitId, unit);
-  }
+  const inScope = units.filter(unit => unitInScope(unit.unitId, unitIds));
+  const ownerByUnit = ownersForUnits(inScope, assignments);
+  const unitById = new Map(inScope.filter(u => ownerByUnit.has(u.unitId)).map(u => [u.unitId, u]));
   if (ownerByUnit.size === 0) return [];
 
   const byUsername = new Map<string, Map<string, UnitBacklog>>();
@@ -146,18 +120,12 @@ export function computeBacklog(input: BacklogInput): PersonBacklog[] {
 
   const result: PersonBacklog[] = [];
   for (const [username, units] of byUsername) {
-    const person = personByUsername.get(username);
-    const directoryName = directory?.get(username);
     const unitList = [...units.values()].sort((a, b) => b.ready.length + b.awaiting.length - (a.ready.length + a.awaiting.length));
     const readyCount = unitList.reduce((n, u) => n + u.ready.length, 0);
     const awaitingCount = unitList.reduce((n, u) => n + u.awaiting.length, 0);
 
     result.push({
-      personId: person?.id ?? null,
-      username,
-      displayName: person?.displayName ?? directoryName ?? username,
-      nameSource: person ? 'registry' : directoryName ? 'directory' : 'unknown',
-      email: person?.email ?? null,
+      ...resolveOwner(username, personByUsername, directory),
       units: unitList,
       readyCount,
       awaitingCount,

@@ -1,7 +1,6 @@
-import { NextResponse } from 'next/server';
 import { list } from '@vercel/blob';
-import { authorizeCron } from '@/lib/auth/cron';
-import { readBaseline } from '@/lib/state/baseline';
+import { runCronJob } from '@/lib/cron/run';
+import { baselineStatus } from '@/lib/state/baseline';
 import { listPeople } from '@/lib/people/repo';
 import { hasDatabase } from '@/lib/db/client';
 import { createTransporter, escapeHtml } from '@/lib/mailer';
@@ -43,24 +42,32 @@ interface Alert {
 }
 
 async function checkBaseline(): Promise<Alert | null> {
-  const baseline = await readBaseline();
-  if (!baseline) {
+  // The metadata probe, not the baseline itself: this only needs a timestamp,
+  // and downloading a megabyte to inflate seventeen for it would be absurd.
+  // It also separates "there is none" from "the store did not answer", which
+  // the full read cannot — that one collapsed both into a mail claiming the
+  // cron had never run, on days when the cron was fine and Blob was down.
+  const status = await baselineStatus();
+  if (status.exists === null) return null;
+
+  if (!status.exists) {
     return {
       kind: 'snapshot_stale',
       subject: 'OHCA Dashboard：狀態快照從未產生',
-      body: '快照 cron（/api/cron/snapshot）還沒有成功跑過任何一次，交接事件與「新交接」篩選都不會有資料。',
+      body: '快照 cron（/api/cron/snapshot）還沒有成功跑過任何一次，交接事件與「新交接」篩選都不會有資料。到 /admin/system 可以看執行紀錄，或直接按「立刻執行」建立第一份基準線。',
       payload: { baseline: null },
     };
   }
 
-  const ageHours = (Date.now() - new Date(baseline.fetchedAt).getTime()) / 3_600_000;
+  const writtenAt = status.uploadedAt!;
+  const ageHours = (Date.now() - new Date(writtenAt).getTime()) / 3_600_000;
   if (ageHours <= STALE_HOURS) return null;
 
   return {
     kind: 'snapshot_stale',
     subject: `OHCA Dashboard：狀態快照已 ${Math.round(ageHours)} 小時未更新`,
-    body: `最後一次成功快照是 ${baseline.fetchedAt}。快照停擺時，畫面看起來與「大家都沒進度」一模一樣——請檢查 /api/cron/snapshot 的執行記錄與 REDCap 連線。`,
-    payload: { baselineFetchedAt: baseline.fetchedAt, ageHours: Math.round(ageHours) },
+    body: `最後一次成功快照是 ${writtenAt}。快照停擺時，畫面看起來與「大家都沒進度」一模一樣——到 /admin/system 看執行紀錄，那裡會說它是失敗、被砍掉，還是根本沒有被觸發。`,
+    payload: { baselineWrittenAt: writtenAt, ageHours: Math.round(ageHours) },
   };
 }
 
@@ -116,17 +123,13 @@ async function alertRecipient(): Promise<{ personId: string | null; email: strin
 }
 
 export async function GET(request: Request) {
-  if (!(await authorizeCron(request))) {
-    return NextResponse.json({ error: '未授權' }, { status: 401 });
-  }
-
-  try {
+  return runCronJob('watchdog', request, async () => {
     const results: Record<string, string> = {};
     const alerts = (await Promise.all([checkBaseline(), checkScans()]))
       .filter((alert): alert is Alert => alert !== null);
 
     if (alerts.length === 0) {
-      return NextResponse.json({ ok: true, alerts: {} });
+      return { ok: true, result: { alerts: {} } };
     }
 
     const recipient = await alertRecipient();
@@ -173,10 +176,6 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, alerts: results });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('cron/watchdog failed:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+    return { ok: true, result: { alerts: results } };
+  });
 }

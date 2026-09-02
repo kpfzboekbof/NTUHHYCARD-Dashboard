@@ -1,5 +1,4 @@
-import { NextResponse } from 'next/server';
-import { authorizeCron } from '@/lib/auth/cron';
+import { runCronJob } from '@/lib/cron/run';
 import { deriveCurrentMatrix } from '@/lib/state/build';
 import { diffMatrices } from '@/lib/state/diff';
 import { readBaseline, writeBaseline } from '@/lib/state/baseline';
@@ -39,12 +38,9 @@ async function deriveWithRetry() {
 }
 
 export async function GET(request: Request) {
-  if (!(await authorizeCron(request))) {
-    return NextResponse.json({ error: '未授權' }, { status: 401 });
-  }
-
   const startedAt = Date.now();
-  try {
+
+  return runCronJob('snapshot', request, async () => {
     const [matrix, baseline] = await Promise.all([deriveWithRetry(), readBaseline()]);
 
     // A partial export can pass the empty-body guard and still be missing
@@ -52,9 +48,10 @@ export async function GET(request: Request) {
     // against the baseline is an export failure, and persisting it would both
     // spray thousands of false events and poison the next diff.
     if (baseline && matrix.records.length < baseline.records.length * 0.5) {
-      return NextResponse.json({
+      return {
+        ok: false,
         error: `匯出僅 ${matrix.records.length} 筆，基準線有 ${baseline.records.length} 筆——視為 REDCap 匯出失敗，未更新基準線`,
-      }, { status: 502 });
+      };
     }
 
     const events = baseline ? diffMatrices(baseline.records, matrix.records) : [];
@@ -74,18 +71,16 @@ export async function GET(request: Request) {
       eventsWritten = await insertWorkEvents(events, matrix.fetchedAt, routing);
     }
 
-    return NextResponse.json({
+    return {
       ok: true,
-      records: matrix.records.length,
-      firstRun: !baseline,
-      baselineWas: baseline?.fetchedAt ?? null,
-      eventsFound: events.length,
-      eventsWritten,
-      tookMs: Date.now() - startedAt,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('cron/snapshot failed:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+      result: {
+        records: matrix.records.length,
+        firstRun: !baseline,
+        baselineWas: baseline?.fetchedAt ?? null,
+        eventsFound: events.length,
+        eventsWritten,
+        tookMs: Date.now() - startedAt,
+      },
+    };
+  });
 }

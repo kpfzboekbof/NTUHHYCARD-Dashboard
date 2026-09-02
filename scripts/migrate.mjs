@@ -39,6 +39,7 @@ const OWNED_TABLES = new Set([
   'work_event',
   'outbound_mail',
   'batch',
+  'cron_run',
 ]);
 
 const client = new Client(url);

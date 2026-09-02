@@ -1,5 +1,5 @@
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { get, put } from '@vercel/blob';
+import { get, list, put } from '@vercel/blob';
 import type { Baseline } from './diff';
 
 /**
@@ -65,4 +65,46 @@ export async function writeBaseline(baseline: Baseline): Promise<void> {
     cacheControlMaxAge: 60, // the SDK's minimum; this blob is rewritten daily
     abortSignal: AbortSignal.timeout(STORE_TIMEOUT_MS),
   });
+}
+
+export interface BaselineStatus {
+  /** True when there is one, false when there is not, null when we could not ask. */
+  exists: boolean | null;
+  /** When the blob was last written — i.e. the last snapshot that succeeded. */
+  uploadedAt: string | null;
+  bytes: number | null;
+}
+
+/**
+ * Whether a baseline exists and when it was written, without downloading it.
+ *
+ * `readBaseline` pulls about a megabyte and inflates it to seventeen; a status
+ * page asking only "is there one, and how old" has no business paying that.
+ *
+ * It is also the only record of snapshots that ran before the run ledger
+ * existed: the blob's write time is, by construction, the last time a snapshot
+ * succeeded, so a fresh ledger does not make years of history look like never.
+ */
+export async function baselineStatus(): Promise<BaselineStatus> {
+  try {
+    const { blobs } = await list({
+      prefix: BASELINE_PATH,
+      limit: 1,
+      abortSignal: AbortSignal.timeout(STORE_TIMEOUT_MS),
+    });
+    const blob = blobs[0];
+    if (!blob) return { exists: false, uploadedAt: null, bytes: null };
+
+    return {
+      exists: true,
+      uploadedAt: new Date(blob.uploadedAt).toISOString(),
+      bytes: blob.size,
+    };
+  } catch {
+    // Unreachable store: `null` says we could not ask. Answering `false` would
+    // read as a broken cron when the cron is fine and it is the blob store
+    // that is down — the exact kind of confident wrong answer this page exists
+    // to stop.
+    return { exists: null, uploadedAt: null, bytes: null };
+  }
 }

@@ -87,6 +87,9 @@ export default function ProductivityPage() {
         title="鍵入進度"
         fetchedAt={logData?.fetchedAt}
         isLoading={isLoading}
+        stale={logData?.stale}
+        refreshing={logData?.refreshing}
+        refreshFailed={logData?.refreshFailed}
         owners={compData?.byOwner?.map(o => o.owner) ?? []}
       />
       <div className="space-y-6 p-6">

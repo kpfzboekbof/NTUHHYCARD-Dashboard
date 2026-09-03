@@ -23,6 +23,9 @@ import type { Batch } from '@/lib/db/batches';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+/** The matrix behind a reminder may be this old; older, and it is re-derived first. */
+const FRESH_ENOUGH_TO_MAIL_SECONDS = 600;
+
 /** A nudge is a batch with no cutoff and no deadline; the body is the same. */
 function unscopedBatch(): Batch {
   return {
@@ -50,7 +53,13 @@ export async function POST(request: Request) {
     const person = await findById(personId);
     if (!person || !person.active) return NextResponse.json({ error: '找不到人員或已停用' }, { status: 404 });
 
-    const [{ backlog }, redcapBase] = await Promise.all([loadBacklog(), getDataEntryBase()]);
+    // A mail that lists work somebody already finished teaches them to ignore
+    // the sender: the matrix behind it must be recent, whatever the screen
+    // was happy to show.
+    const [{ backlog }, redcapBase] = await Promise.all([
+      loadBacklog({}, { maxAgeSeconds: FRESH_ENOUGH_TO_MAIL_SECONDS }),
+      getDataEntryBase(),
+    ]);
     const theirs = backlog.find(p => p.personId === person.id);
 
     if (!theirs) {

@@ -1,65 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchLogging, fetchUsers } from '@/lib/redcap/client';
-import { getAssignments, getTargetIds } from '@/lib/owner-store';
-import { transformCompletion, transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
-import type { CompletionResponse, LoggingResponse, User } from '@/types';
+import { getRedcapUsers } from '@/lib/redcap/users';
+import { readOwnerStore } from '@/lib/owner-store';
+import { calcLoggingStats } from '@/lib/redcap/transform';
+import { defineView, readView, viewPayload, type ViewDefinition } from '@/lib/views/view';
+import { VIEW } from '@/lib/views/keys';
+import { completionRows } from '@/lib/views/completion';
+import { requireRedcapLogs } from '@/lib/views/logs';
+import type { LoggingResponse } from '@/types';
 
-const USERS_CACHE_KEY = 'redcap_users';
+/**
+ * GET /api/logging?months=N — productivity per owner over a look-back window.
+ *
+ * Composed from two views (the completion rows and the REDCap log for the
+ * window) and cheap to rebuild once those exist, so it never takes the REDCap
+ * lease itself.
+ */
+
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
+const views = new Map<number, ViewDefinition<LoggingResponse>>();
+
+function loggingView(months: number): ViewDefinition<LoggingResponse> {
+  let view = views.get(months);
+  if (!view) {
+    view = defineView<LoggingResponse>({
+      key: VIEW.logging(months),
+      freshSeconds: 900,
+      async build(ctx) {
+        const [{ assignments, targetIds }, users] = await Promise.all([readOwnerStore(), getRedcapUsers(ctx.force)]);
+        // One after the other: this build does not export itself, so it runs
+        // outside the REDCap gate, and two forced exporting inputs read in
+        // parallel would race for the REDCap lease — the loser served from
+        // its old copy without a rebuild.
+        const rows = await completionRows(ctx);
+        const logs = await requireRedcapLogs(months, ctx);
+        const stats = calcLoggingStats(logs, rows, months, assignments, users, targetIds);
+        return { ...stats, fetchedAt: new Date().toISOString() };
+      },
+    });
+    views.set(months, view);
+  }
+  return view;
+}
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const months = parseInt(searchParams.get('months') || '3');
-    const noCache = searchParams.get('noCache') === '1';
-    const cacheKey = `logging_${months}`;
-
-    if (noCache) clearAllCache();
-
-    const cached = !noCache ? await getCachedAsync<LoggingResponse>(cacheKey) : undefined;
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-
-    const assignments = await getAssignments();
-
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
-
-    // Need completion data for stats calculation
-    let completionRows = (await getCachedAsync<CompletionResponse>('completion'))?.rows;
-    if (!completionRows) {
-      const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
-        fetchCompletionStatus(),
-        fetchCoreAssistantStatus(),
-        fetchOutcomeStatus(),
-      ]);
-      completionRows = transformCompletion(raw, assignments, users, {
-        coreAssistant: coreAssistantStatus,
-        outcomeAssistant: outcomeStatus.assistantStatus,
-        outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-      });
-    }
-
-    const rawLogs = await fetchLogging(months);
-    const logs = transformLogs(rawLogs);
-    const targetIds = await getTargetIds();
-    const stats = calcLoggingStats(logs, completionRows, months, assignments, users, targetIds);
-
-    const data: LoggingResponse = {
-      ...stats,
-      fetchedAt: new Date().toISOString(),
-    };
-
-    setCached(cacheKey, data, 600);
-    return NextResponse.json(data);
+    const params = request.nextUrl.searchParams;
+    const months = Math.min(Math.max(parseInt(params.get('months') || '3') || 3, 1), 24);
+    const force = params.get('noCache') === '1';
+    const result = await readView(loggingView(months), { force });
+    return NextResponse.json(viewPayload(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

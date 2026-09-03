@@ -50,6 +50,19 @@ const store = createVersionedStore<StoreData>({
   normalize,
 });
 
+export type OwnerStoreData = StoreData;
+
+/**
+ * Everything in the blob in one read.
+ *
+ * The three getters below each read the whole value and keep one field, so a
+ * route wanting assignments, hidden forms and targets paid three round trips
+ * to Redis for the same bytes. Prefer this where more than one is needed.
+ */
+export async function readOwnerStore(): Promise<OwnerStoreData> {
+  return (await store.read()).data;
+}
+
 export async function getAssignments(): Promise<OwnerAssignments> {
   return (await store.read()).data.assignments;
 }

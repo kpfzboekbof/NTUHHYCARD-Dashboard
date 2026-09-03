@@ -4,6 +4,8 @@ import { hasDatabase } from '@/lib/db/client';
 import { fetchUsers } from '@/lib/redcap/client';
 import { createPeople, createPerson, listPeople, updatePerson } from '@/lib/people/repo';
 import { planImport, type ImportPlan } from '@/lib/people/import-redcap';
+import { invalidateViews } from '@/lib/views/view';
+import { VIEW } from '@/lib/views/keys';
 
 /**
  * POST /api/admin/people/import — seed the registry from REDCap's user export.
@@ -80,6 +82,9 @@ export async function POST(request: Request) {
         });
       }
     }
+
+    // The owners page joins people in at build time.
+    if (created > 0 || updated > 0) await invalidateViews([VIEW.ownersProgress]);
 
     return NextResponse.json({
       created,

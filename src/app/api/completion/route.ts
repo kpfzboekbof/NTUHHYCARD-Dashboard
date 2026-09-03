@@ -1,75 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus, fetchUsers, fetchTraumaEligibleIds } from '@/lib/redcap/client';
-import { getAssignments, getHiddenForms, getTargetIds } from '@/lib/owner-store';
-import { transformCompletion, calcFormStats, calcOwnerStats } from '@/lib/redcap/transform';
-import { getDataEntryBase } from '@/lib/redcap/deep-link';
-import type { CompletionResponse, User } from '@/types';
+import { readView, viewPayload } from '@/lib/views/view';
+import { completionView } from '@/lib/views/completion';
 
-const CACHE_KEY = 'completion';
-const USERS_CACHE_KEY = 'redcap_users';
+/**
+ * GET /api/completion — the legacy completion matrix, packed.
+ *
+ * Answered from the last build (see src/lib/views); `noCache=1` is the
+ * 重新抓取 button and waits for a fresh REDCap export. The body carries
+ * `packed` rather than `rows`: the client hook unpacks it.
+ */
+
+export const runtime = 'nodejs';
+// The background rebuild scheduled by readView runs inside this budget.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
-
-    const cached = !noCache ? await getCachedAsync<CompletionResponse>(CACHE_KEY) : undefined;
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-
-    const [assignments, hiddenForms] = await Promise.all([
-      getAssignments(),
-      getHiddenForms(),
-    ]);
-
-    // Fetch users with cache
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
-
-    const [raw, coreAssistantStatus, outcomeStatus, traumaIds] = await Promise.all([
-      fetchCompletionStatus(),
-      fetchCoreAssistantStatus(),
-      fetchOutcomeStatus(),
-      fetchTraumaEligibleIds(),
-    ]);
-    const rows = transformCompletion(raw, assignments, users, {
-      coreAssistant: coreAssistantStatus,
-      outcomeAssistant: outcomeStatus.assistantStatus,
-      outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-    }, traumaIds);
-    const visibleRows = rows.filter(r => !hiddenForms.includes(r.form));
-    const byForm = calcFormStats(visibleRows);
-    const byOwner = calcOwnerStats(visibleRows);
-
-    // Count unique study IDs
-    const allStudyIds = new Set(rows.map(r => r.studyId));
-    const validStudyIds = new Set(rows.filter(r => !r.excluded).map(r => r.studyId));
-
-    const data: CompletionResponse = {
-      rows: visibleRows,
-      byForm,
-      byOwner,
-      users,
-      assignments,
-      hiddenForms,
-      targetIds: await getTargetIds(),
-      totalRecords: allStudyIds.size,
-      validOhcaCount: validStudyIds.size,
-      redcapBaseUrl: await getDataEntryBase(),
-      fetchedAt: new Date().toISOString(),
-    };
-
-    setCached(CACHE_KEY, data, 300);
-    return NextResponse.json(data);
+    const force = request.nextUrl.searchParams.get('noCache') === '1';
+    const result = await readView(completionView, { force });
+    return NextResponse.json(viewPayload(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchQcRecords, batchImportField } from '@/lib/redcap/client';
-import { clearAllCache } from '@/lib/cache';
+import { invalidateViews } from '@/lib/views/view';
+import { WRITE_EFFECTS } from '@/lib/views/keys';
 import { requireRole } from '@/lib/auth/identity';
 import { recordAuditMany } from '@/lib/db/audit';
 
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     // Report the records REDCap confirmed, not the ones we asked it to write.
     const { imported, missing } = await batchImportField(records);
-    clearAllCache();
+    await invalidateViews(WRITE_EFFECTS.qcFix);
 
     await recordAuditMany(imported.map(studyId => ({
       actor: auth.identity.actor,

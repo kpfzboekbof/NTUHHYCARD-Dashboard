@@ -5,7 +5,7 @@ import { calcLoggingStats } from '@/lib/redcap/transform';
 import { defineView, readView, viewPayload, type ViewDefinition } from '@/lib/views/view';
 import { VIEW } from '@/lib/views/keys';
 import { completionRows } from '@/lib/views/completion';
-import { redcapLogs } from '@/lib/views/logs';
+import { requireRedcapLogs } from '@/lib/views/logs';
 import type { LoggingResponse } from '@/types';
 
 /**
@@ -29,7 +29,12 @@ function loggingView(months: number): ViewDefinition<LoggingResponse> {
       freshSeconds: 900,
       async build(ctx) {
         const [{ assignments, targetIds }, users] = await Promise.all([readOwnerStore(), getRedcapUsers(ctx.force)]);
-        const [rows, logs] = await Promise.all([completionRows(ctx), redcapLogs(months, ctx)]);
+        // One after the other: this build does not export itself, so it runs
+        // outside the REDCap gate, and two forced exporting inputs read in
+        // parallel would race for the REDCap lease — the loser served from
+        // its old copy without a rebuild.
+        const rows = await completionRows(ctx);
+        const logs = await requireRedcapLogs(months, ctx);
         const stats = calcLoggingStats(logs, rows, months, assignments, users, targetIds);
         return { ...stats, fetchedAt: new Date().toISOString() };
       },

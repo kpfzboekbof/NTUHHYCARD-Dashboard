@@ -37,9 +37,10 @@ export async function getRedis(): Promise<Redis | null> {
 }
 
 async function connect(): Promise<Redis | null> {
+  let client: Redis | null = null;
   try {
     const RedisClient = (await import('ioredis')).default;
-    const client = new RedisClient(process.env.REDIS_URL || '', {
+    client = new RedisClient(process.env.REDIS_URL || '', {
       maxRetriesPerRequest: 1,
       lazyConnect: true,
       connectTimeout: 3000,
@@ -60,6 +61,9 @@ async function connect(): Promise<Redis | null> {
     await client.connect();
     return client;
   } catch {
+    // ioredis keeps reconnecting on its own after a failed first connect;
+    // stop that, or every failed attempt leaves a client retrying for ever.
+    client?.disconnect();
     return null;
   }
 }

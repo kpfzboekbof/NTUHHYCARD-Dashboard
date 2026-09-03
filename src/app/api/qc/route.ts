@@ -8,7 +8,7 @@ import { getDataEntryBase } from '@/lib/redcap/deep-link';
 import { defineView, readView, viewPayload } from '@/lib/views/view';
 import { VIEW } from '@/lib/views/keys';
 import { completionRows } from '@/lib/views/completion';
-import { redcapLogs } from '@/lib/views/logs';
+import { requireRedcapLogs } from '@/lib/views/logs';
 import type { QcResponse } from '@/types';
 
 /**
@@ -33,10 +33,10 @@ const qcView = defineView<QcResponse>({
 
     const recordFlags = runRecordChecks(await fetchQcRecords());
 
-    const [logs, rows] = await Promise.all([
-      redcapLogs(LOG_MONTHS, ctx),
-      completionRows(ctx),
-    ]);
+    // One after the other: inside this build the REDCap gate is already held,
+    // so these two would otherwise export side by side.
+    const logs = await requireRedcapLogs(LOG_MONTHS, ctx);
+    const rows = await completionRows(ctx);
     const stats = calcLoggingStats(logs, rows, LOG_MONTHS, assignments, users);
     const behaviorFlags = runBehaviorChecks(
       logs.map(l => ({ timestamp: l.timestamp, username: l.username })),

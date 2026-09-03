@@ -277,3 +277,110 @@ test('exporting builds on one instance run one at a time', async () => {
   await Promise.all([readView(make('x')), readView(make('y')), readView(make('z'))]);
   assert.equal(overlap, 1);
 });
+
+test('a forced composed build re-exports every input, even read in parallel', async () => {
+  const { view: a, builds: aBuilds } = counterView('a', { dependents: ['c'] });
+  const { view: b, builds: bBuilds } = counterView('b', { dependents: ['c'] });
+  const c = defineView<{ a: number; b: number }>({
+    key: 'c',
+    freshSeconds: 600,
+    build: async ctx => {
+      const [x, y] = await Promise.all([readView(a, { force: ctx.force }), readView(b, { force: ctx.force })]);
+      return { a: x.data.n, b: y.data.n };
+    },
+  });
+  await readView(c);
+  const forced = await readView(c, { force: true });
+  assert.deepEqual(forced.data, { a: 2, b: 2 });
+  assert.equal(aBuilds(), 2);
+  assert.equal(bBuilds(), 2);
+});
+
+test('an input that lands inside a build does not invalidate that build', async () => {
+  const { view: input } = counterView('input', { dependents: ['composed'] });
+  let n = 0;
+  const composed = defineView<{ n: number }>({
+    key: 'composed',
+    freshSeconds: 600,
+    onInvalidate: 'rebuild',
+    build: async ctx => { await readView(input, { force: ctx.force }); return { n: ++n }; },
+  });
+  const first = await readView(composed);
+  assert.equal(first.stale, false, 'the input landed inside this build, which was made from it');
+  const again = await readView(composed);
+  assert.equal(again.source, 'memory');
+  assert.equal(n, 1);
+});
+
+test('a job deferred from inside a gated build still queues on the gate', async () => {
+  const { AsyncLocalStorage } = await import('node:async_hooks');
+  // Next's after() binds the callback to the calling async context.
+  resetViewsForTests({ scheduler: job => { jobs.push(AsyncLocalStorage.bind(job)); }, store: fake.store });
+
+  let running = 0;
+  let overlap = 0;
+  const slow = (key: string, extra: Partial<Parameters<typeof defineView<{ key: string }>>[0]> = {}) => defineView<{ key: string }>({
+    key,
+    freshSeconds: 600,
+    exportsFromRedcap: true,
+    build: async () => {
+      running++;
+      overlap = Math.max(overlap, running);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      running--;
+      return { key };
+    },
+    ...extra,
+  });
+  const input = slow('input');
+  fake.rows.set('input', { data: { key: 'old' }, fetchedAt: minutesAgo(20), invalidatedAt: null, refreshStartedAt: null, refreshAttempts: 0 });
+  const outer = slow('outer', { build: async () => { await readView(input); await new Promise(r => setTimeout(r, 20)); return { key: 'outer' }; } });
+
+  await readView(outer); // reads the stale input inside the gate → schedules its refresh
+  assert.equal(jobs.length, 1);
+  const other = slow('other');
+  // The deferred job and a fresh foreground export must not overlap.
+  await Promise.all([runJobs(), readView(other)]);
+  assert.equal(overlap, 1);
+});
+
+test('backing off because REDCap is busy does not count as an attempt', async () => {
+  const { view } = counterView('a');
+  fake.rows.set('a', { data: { n: 0 }, fetchedAt: minutesAgo(20), invalidatedAt: null, refreshStartedAt: null, refreshAttempts: 0 });
+  fake.rows.set(REDCAP_EXPORT_LOCK, { invalidatedAt: null, refreshStartedAt: new Date().toISOString(), refreshAttempts: 0 });
+  await readView(view);
+  await runJobs();
+  assert.equal(fake.rows.get('a')?.refreshAttempts, 0);
+});
+
+test('an invalidated rebuild-mode view waits for the REDCap lease rather than answer with the old build', async () => {
+  resetViewsForTests({ scheduler: job => { jobs.push(job); }, store: fake.store, leaseWaitMs: 500, leasePollMs: 10 });
+  const { view, builds } = counterView('a', { onInvalidate: 'rebuild' });
+  await readView(view);
+  await invalidateViews(['a']);
+  // Another instance is exporting; it finishes shortly.
+  fake.rows.set(REDCAP_EXPORT_LOCK, { invalidatedAt: null, refreshStartedAt: new Date().toISOString(), refreshAttempts: 0 });
+  setTimeout(() => fake.rows.set(REDCAP_EXPORT_LOCK, { invalidatedAt: null, refreshStartedAt: null, refreshAttempts: 0 }), 40);
+
+  const served = await readView(view);
+  assert.equal(served.source, 'built');
+  assert.equal(builds(), 2);
+});
+
+test('a newer build whose bytes cannot be read does not launder an older copy', async () => {
+  const { view } = counterView('a', { onInvalidate: 'rebuild' });
+  await readView(view);
+  await invalidateViews(['a']);
+  // Another instance landed a newer build (clearing the mark) but its bytes are unreadable here.
+  const newer = { ...fake.rows.get('a')!, fetchedAt: new Date(Date.now() + 1000).toISOString(), invalidatedAt: null };
+  fake.rows.set('a', newer);
+  const store = fake.store;
+  const readStoredView = store.readStoredView;
+  store.readStoredView = async () => null;
+  try {
+    const served = await readView(view);
+    assert.equal(served.source, 'built', 'the local copy still carried the write it had seen');
+  } finally {
+    store.readStoredView = readStoredView;
+  }
+});

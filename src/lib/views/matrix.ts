@@ -118,7 +118,9 @@ export const matrixView = defineView<StoredMatrix>({
 export async function attachOwners(units: MatrixUnit[]): Promise<UnitSummary[]> {
   const [assignments, users, people] = await Promise.all([
     getAssignments(),
-    getRedcapUsers(),
+    // A directory lookup failure costs display names, never the page: the
+    // stored matrix is good whether or not REDCap answers right now.
+    getRedcapUsers().catch(() => []),
     // The person registry link makes a unit's owner nudgeable; without it the
     // owner is still shown by name, there is just nobody to mail.
     hasDatabase() ? listPeople().catch(() => []) : Promise.resolve([]),

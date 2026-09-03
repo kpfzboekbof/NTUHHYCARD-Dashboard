@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { CronStatusResponse } from '@/app/api/admin/cron-runs/route';
 import type { JobStatus } from '@/lib/cron/health';
+import { leaseActive } from '@/lib/views/policy';
 
 /**
  * 系統狀態 — whether the background jobs are actually running.
@@ -243,9 +244,14 @@ function SystemBoard() {
                     <tbody>
                       {data.views.filter(v => !v.key.startsWith('__')).map(view => {
                         const ageMinutes = view.fetchedAt ? Math.round((Date.now() - new Date(view.fetchedAt).getTime()) / 60_000) : null;
-                        const refreshingSince = view.refreshStartedAt
+                        // The lease rule the reader applies: past 300 s a
+                        // rebuild that never landed is presumed dead, and
+                        // 「重推導中」 would be a promise nobody is keeping.
+                        const attemptMinutes = view.refreshStartedAt
                           ? Math.round((Date.now() - new Date(view.refreshStartedAt).getTime()) / 60_000)
                           : null;
+                        const refreshingSince = leaseActive(view.refreshStartedAt, 300, Date.now()) ? attemptMinutes : null;
+                        const lastAttempt = refreshingSince === null ? attemptMinutes : null;
                         return (
                           <tr key={view.key} className="border-b">
                             <td className="p-2 pl-4 font-mono text-xs">{view.key}</td>
@@ -260,6 +266,7 @@ function SystemBoard() {
                             <td className="p-2 text-xs">
                               {view.invalidatedAt && <span className="mr-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300">有寫入待重推導</span>}
                               {refreshingSince !== null && <span className="mr-2 rounded bg-blue-100 px-1.5 py-0.5 text-blue-800 dark:bg-blue-950 dark:text-blue-300">重推導中（{refreshingSince} 分鐘）</span>}
+                              {lastAttempt !== null && <span className="mr-2 text-zinc-400">上次嘗試 {lastAttempt} 分鐘前未落地</span>}
                               {view.refreshAttempts > 0 && (
                                 <span className={`rounded px-1.5 py-0.5 ${view.refreshAttempts >= 3 ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>
                                   背景重跑 {view.refreshAttempts} 次未落地

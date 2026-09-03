@@ -238,6 +238,7 @@ interface Envelope {
   fetchedAt: string;
   /** base64(gzip(JSON)) */
   payload: string;
+  invalidatedAt?: string | null;
 }
 
 const FALLBACK_TTL_SECONDS = 86_400;
@@ -250,7 +251,7 @@ async function fallbackRead<T>(key: string): Promise<StoredView<T> | null> {
   return {
     data: decodeView<T>(compressed),
     fetchedAt: envelope.fetchedAt,
-    invalidatedAt: null,
+    invalidatedAt: envelope.invalidatedAt ?? null,
     refreshStartedAt: null,
     refreshAttempts: 0,
     bytes: compressed.byteLength,
@@ -263,7 +264,7 @@ async function fallbackHead(key: string): Promise<ViewHead | null> {
   return {
     key,
     fetchedAt: envelope.fetchedAt ?? null,
-    invalidatedAt: null,
+    invalidatedAt: envelope.invalidatedAt ?? null,
     refreshStartedAt: null,
     refreshAttempts: 0,
     bytes: envelope.payload ? Buffer.byteLength(envelope.payload, 'base64') : null,
@@ -271,13 +272,17 @@ async function fallbackHead(key: string): Promise<ViewHead | null> {
 }
 
 function fallbackWrite(key: string, compressed: Buffer, fetchedAt: string): void {
-  setCached<Envelope>(fallbackKey(key), { fetchedAt, payload: compressed.toString('base64') }, FALLBACK_TTL_SECONDS);
+  setCached<Envelope>(fallbackKey(key), { fetchedAt, payload: compressed.toString('base64'), invalidatedAt: null }, FALLBACK_TTL_SECONDS);
 }
 
-function fallbackInvalidate(keys: string[]): void {
-  // Without a column to mark there is nothing to mark; dropping the entry
-  // makes the next read rebuild, which is the stricter of the two outcomes.
-  for (const key of keys) deleteCached(fallbackKey(key));
+async function fallbackInvalidate(keys: string[], at: string): Promise<void> {
+  // Mark rather than drop: an instance that holds a memory copy learns of an
+  // invalidation from the head, and a deleted envelope has no head to read.
+  for (const key of keys) {
+    const envelope = await getCachedAsync<Envelope>(fallbackKey(key));
+    if (envelope) setCached<Envelope>(fallbackKey(key), { ...envelope, invalidatedAt: at }, FALLBACK_TTL_SECONDS);
+    else deleteCached(fallbackKey(key));
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -365,7 +370,7 @@ export async function invalidateStoredViews(keys: string[], at: string): Promise
   if (keys.length === 0) return;
   try {
     if (hasDatabase()) await dbInvalidate(keys, at);
-    else fallbackInvalidate(keys);
+    else await fallbackInvalidate(keys, at);
   } catch (error) {
     console.error(`views: invalidate ${keys.join(',')} failed`, error);
   }

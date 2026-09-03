@@ -32,16 +32,23 @@ export function redcapLogsView(months: number): ViewDefinition<LogEntry[]> {
 }
 
 /**
- * The log for a window, or nothing.
- *
- * The log is what activity and credit columns are made of; losing it costs
- * those columns, never the progress numbers, so a failed export here is
- * reported as an empty log rather than raised.
+ * The log for a window. A failed export is the caller's: for a view whose
+ * content IS the log (productivity, QC behaviour checks) an empty log would
+ * be persisted as a valid build and served for its whole window.
+ */
+export async function requireRedcapLogs(months: number, ctx: ViewContext): Promise<LogEntry[]> {
+  const { data } = await readView(redcapLogsView(months), { force: ctx.force });
+  return data;
+}
+
+/**
+ * The log for a window, or nothing — only for the owners page, where the
+ * log feeds the activity and credit columns and must never cost the progress
+ * numbers.
  */
 export async function redcapLogs(months: number, ctx: ViewContext): Promise<LogEntry[]> {
   try {
-    const { data } = await readView(redcapLogsView(months), { force: ctx.force });
-    return data;
+    return await requireRedcapLogs(months, ctx);
   } catch (error) {
     console.error(`views: REDCap log (${months} months) unavailable`, error);
     return [];

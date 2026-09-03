@@ -171,6 +171,33 @@ function outstandingInvalidation(key: string, fetchedAt: string, fromStore: stri
 const insideGate = new AsyncLocalStorage<true>();
 let gateTail: Promise<void> = Promise.resolve();
 
+/**
+ * The views whose builds are running up this async chain. A view a build
+ * reads — and so lands inside it — must not invalidate that build: it was
+ * made from the input that just landed.
+ */
+const building = new AsyncLocalStorage<ReadonlySet<string>>();
+
+function dependentsToInvalidate(view: ViewDefinition<unknown>): string[] {
+  const ancestors = building.getStore();
+  return (view.dependents ?? []).filter(key => !ancestors?.has(key));
+}
+
+/**
+ * The async context before any build: `after()` binds its callback to the
+ * calling context (AsyncLocalStorage.bind), so a job queued from inside a
+ * gated build would otherwise run with the gate — and the ancestry — still
+ * set, and bypass both.
+ */
+const cleanContext = AsyncLocalStorage.snapshot();
+
+/** REDCap leases held by builds on this instance, foreground or background. */
+let heldRedcapLeases = 0;
+
+/** How long a build that must run waits for another instance's export to finish. */
+let leaseWaitMs = 120_000;
+let leasePollMs = 2_000;
+
 async function throughRedcapGate<R>(fn: () => Promise<R>): Promise<R> {
   if (insideGate.getStore()) return fn();
   const previous = gateTail;
@@ -193,7 +220,8 @@ async function throughRedcapGate<R>(fn: () => Promise<R>): Promise<R> {
 type Scheduler = (job: () => Promise<void>) => void | Promise<void>;
 let scheduler: Scheduler | null = null;
 
-async function schedule(job: () => Promise<void>): Promise<void> {
+async function schedule(deferred: () => Promise<void>): Promise<void> {
+  const job = () => cleanContext(deferred);
   if (!scheduler) {
     try {
       const { after } = await import('next/server');
@@ -261,7 +289,10 @@ async function current(view: ViewDefinition<unknown>, now: number): Promise<Foun
       return { entry, source: 'store' };
     }
   }
-  if (head) {
+  if (head && head.fetchedAt === mem.fetchedAt) {
+    // The same build: its lease and invalidation marks are ours to adopt. A
+    // newer build whose bytes could not be read is not — its cleared
+    // invalidation would make this older copy look current.
     mem.invalidatedAt = head.invalidatedAt;
     mem.refreshStartedAt = head.refreshStartedAt;
     mem.refreshAttempts = head.refreshAttempts;
@@ -293,7 +324,9 @@ function rebuild<T>(view: ViewDefinition<T>, options: RebuildOptions): Promise<V
     // instant is about something this build may not have seen. Taken inside
     // the gate, so time spent queued behind another export does not count.
     const fetchedAt = new Date().toISOString();
-    const data = await view.build({ force: options.force });
+    const ancestry = new Set(building.getStore() ?? []);
+    ancestry.add(view.key);
+    const data = await building.run(ancestry, () => view.build({ force: options.force }));
     return { data, fetchedAt };
   };
 
@@ -314,7 +347,8 @@ function rebuild<T>(view: ViewDefinition<T>, options: RebuildOptions): Promise<V
         checkedAt: Date.now(),
       };
       memory.set(view.key, entry);
-      if (view.dependents?.length) await invalidateViews(view.dependents);
+      const dependents = dependentsToInvalidate(view);
+      if (dependents.length) await invalidateViews(dependents);
       return { data, fetchedAt, stale: entry.invalidatedAt !== null, refreshing: false, refreshFailed: false, source: 'built' };
     } catch (error) {
       for (const lease of options.leases ?? []) await releaseLease(lease.key, lease.token);
@@ -354,27 +388,58 @@ function fromEntry<T>(found: Found, stale: boolean, refreshing: boolean, refresh
   };
 }
 
+interface ForegroundOptions {
+  force: boolean;
+  /** What exists, when the caller already looked. */
+  have: Found | null;
+  /**
+   * When another instance holds the REDCap lease: `serve` answers with what
+   * exists, marked refreshing (the 重新抓取 button — the running export will
+   * land and the client's polling picks it up); `wait` polls for the lease,
+   * for readers that must not answer with what exists (a view invalidated by
+   * the caller's own write, mail about to name a person).
+   */
+  onBusy: 'serve' | 'wait';
+  /** Build even if the lease never comes: there is nothing to serve, or the caller cannot use what exists. */
+  mustBuild: boolean;
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * A build the request waits for.
  *
  * A top-level exporting build takes the REDCap lease so it never runs beside
- * a background export on another instance. If that lease is held, the
- * request gets what exists, marked refreshing — the running export will land
- * and the client's polling will pick it up — unless there is nothing to give,
- * in which case the build goes ahead regardless.
+ * a background export on another instance. When the holder is this very
+ * instance (a sibling input of the same composed build, or a background job)
+ * the build queues on the in-process gate behind it instead.
  */
-async function foreground<T>(view: ViewDefinition<T>, force: boolean, have: Found | null): Promise<ViewResult<T>> {
+async function foreground<T>(view: ViewDefinition<T>, options: ForegroundOptions): Promise<ViewResult<T>> {
+  const { force } = options;
   if (!view.exportsFromRedcap || insideGate.getStore()) return rebuild(view, { force });
 
-  const token = await claimLease(REDCAP_EXPORT_LOCK, leaseFor(view), false);
+  let token = await claimLease(REDCAP_EXPORT_LOCK, leaseFor(view), false);
+  if (!token && heldRedcapLeases > 0) return rebuild(view, { force });
+
+  if (!token && options.onBusy === 'wait') {
+    const deadline = Date.now() + leaseWaitMs;
+    while (!token && Date.now() < deadline) {
+      await sleep(leasePollMs);
+      token = await claimLease(REDCAP_EXPORT_LOCK, leaseFor(view), false);
+    }
+  }
+
   if (!token) {
-    const found = have ?? await current(view, Date.now());
-    if (found) return fromEntry<T>(found, true, true);
+    const found = options.have ?? await current(view, Date.now());
+    if (found && !options.mustBuild) return fromEntry<T>(found, true, true);
     return rebuild(view, { force });
   }
+
+  heldRedcapLeases++;
   try {
     return await rebuild(view, { force });
   } finally {
+    heldRedcapLeases--;
     await releaseLease(REDCAP_EXPORT_LOCK, token);
   }
 }
@@ -394,21 +459,25 @@ async function scheduleRefresh<T>(view: ViewDefinition<T>): Promise<void> {
     // meeting is waiting on its own write) outranks background work.
     if (inflight.size > 0) return;
 
-    const token = await claimLease(view.key, lease, true);
-    if (!token) return; // another instance is already on it
-    const leases = [{ key: view.key, token }];
-
+    // REDCap first, uncounted: a job that backs off because another export
+    // is running has not attempted anything, and must not move the counter
+    // that decides when the view gives up on the background.
+    let redcap: LeaseToken | null = null;
     if (view.exportsFromRedcap) {
-      const redcap = await claimLease(REDCAP_EXPORT_LOCK, lease, false);
-      if (!redcap) {
-        // REDCap is busy with another view's export. Give the view lease
-        // back so the next read can try again once that one has landed.
-        await releaseLease(view.key, token);
-        return;
-      }
-      leases.push({ key: REDCAP_EXPORT_LOCK, token: redcap });
+      redcap = await claimLease(REDCAP_EXPORT_LOCK, lease, false);
+      if (!redcap) return; // busy with another view's export; the next read tries again
     }
 
+    const token = await claimLease(view.key, lease, true);
+    if (!token) {
+      // Another instance is already on this view.
+      if (redcap) await releaseLease(REDCAP_EXPORT_LOCK, redcap);
+      return;
+    }
+    const leases = [{ key: view.key, token }];
+    if (redcap) leases.push({ key: REDCAP_EXPORT_LOCK, token: redcap });
+
+    if (redcap) heldRedcapLeases++;
     try {
       await rebuild(view, { force: false, leases });
     } catch (error) {
@@ -416,8 +485,10 @@ async function scheduleRefresh<T>(view: ViewDefinition<T>): Promise<void> {
       // and the attempt counter is what stops it trying for ever.
       console.error(`views: background refresh of ${view.key} failed`, error);
       return;
+    } finally {
+      if (redcap) heldRedcapLeases--;
     }
-    if (view.exportsFromRedcap) await releaseLease(REDCAP_EXPORT_LOCK, leases[1].token);
+    if (redcap) await releaseLease(REDCAP_EXPORT_LOCK, redcap);
   });
 }
 
@@ -425,18 +496,18 @@ async function scheduleRefresh<T>(view: ViewDefinition<T>): Promise<void> {
  * Read a view. See the module comment for when this waits for REDCap.
  */
 export async function readView<T>(view: ViewDefinition<T>, options: ReadOptions = {}): Promise<ViewResult<T>> {
-  if (options.force) return foreground(view, true, null);
+  if (options.force) return foreground(view, { force: true, have: null, onBusy: 'serve', mustBuild: false });
 
   const now = Date.now();
   const found = await current(view, now);
-  if (!found) return foreground(view, false, null);
+  if (!found) return foreground(view, { force: false, have: null, onBusy: 'wait', mustBuild: true });
 
   const { entry } = found;
   const ageSeconds = (now - Date.parse(entry.fetchedAt)) / 1000;
   if (options.maxAgeSeconds !== undefined && !(ageSeconds <= options.maxAgeSeconds)) {
     // Too old for what the caller is about to do with it; that outranks the
     // stale-while-revalidate contract, and a failure here is the caller's.
-    return rebuild(view, { force: false });
+    return foreground(view, { force: false, have: found, onBusy: 'wait', mustBuild: true });
   }
 
   const refreshing = inflight.has(view.key) || leaseActive(entry.refreshStartedAt, leaseFor(view), now);
@@ -451,7 +522,9 @@ export async function readView<T>(view: ViewDefinition<T>, options: ReadOptions 
 
   if (freshness === 'invalidated' && (view.onInvalidate ?? 'refresh') === 'rebuild') {
     try {
-      return await foreground(view, false, found);
+      // Serving what exists would be serving the data from before the write
+      // this reader is about to act on: wait for the lease instead.
+      return await foreground(view, { force: false, have: found, onBusy: 'wait', mustBuild: false });
     } catch (error) {
       // REDCap did not answer. The old snapshot beats an error page; it is
       // marked stale so the screen says so.
@@ -524,10 +597,18 @@ export function viewPayload<T extends object>(result: ViewResult<T>): T & {
  * For tests: forget everything this instance holds, and optionally swap in a
  * scheduler and a durable tier.
  */
-export function resetViewsForTests(options: { scheduler?: Scheduler | null; store?: DurableStore } = {}): void {
+export function resetViewsForTests(options: {
+  scheduler?: Scheduler | null;
+  store?: DurableStore;
+  leaseWaitMs?: number;
+  leasePollMs?: number;
+} = {}): void {
   memory.clear();
   inflight.clear();
   invalidations.clear();
+  heldRedcapLeases = 0;
   scheduler = options.scheduler ?? null;
   store = options.store ?? durable;
+  leaseWaitMs = options.leaseWaitMs ?? 120_000;
+  leasePollMs = options.leasePollMs ?? 2_000;
 }

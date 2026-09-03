@@ -374,7 +374,15 @@ export default function EtiologyPage() {
 
   return (
     <div>
-      <Header title="Etiology 共識追蹤" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} />
+      <Header
+        title="Etiology 共識追蹤"
+        fetchedAt={data?.fetchedAt}
+        onRefresh={refresh}
+        isLoading={isLoading}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
+      />
       <div className="space-y-6 p-6">
         {isLoading && !data ? (
           <div className="py-20 text-center text-zinc-400">載入中...</div>

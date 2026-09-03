@@ -4,6 +4,7 @@ import { hasDatabase } from '@/lib/db/client';
 import { latestCronRuns, listCronRuns } from '@/lib/db/cron-runs';
 import { jobHealth, JOB_SPECS, type JobHealth } from '@/lib/cron/health';
 import { baselineStatus, type BaselineStatus } from '@/lib/state/baseline';
+import { durableTier, listViewHeads, type ViewHead } from '@/lib/views/store';
 
 /**
  * GET /api/admin/cron-runs — did the background jobs actually run?
@@ -25,6 +26,14 @@ export interface CronStatusResponse {
    * does not make a working job look like it never fired.
    */
   baseline: BaselineStatus;
+  /**
+   * The derived views: when each was last built, how big, and whether a
+   * background rebuild is running or has been giving up. A refresh that dies
+   * at the platform's time limit is as silent as a cron that never fires, and
+   * this is where it shows.
+   */
+  views: ViewHead[];
+  viewTier: ReturnType<typeof durableTier>;
   hasDatabase: boolean;
   fetchedAt: string;
 }
@@ -35,10 +44,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const limit = Math.min(Number(request.nextUrl.searchParams.get('limit')) || 50, 200);
-    const [latest, runs, baseline] = await Promise.all([
+    const [latest, runs, baseline, views] = await Promise.all([
       hasDatabase() ? latestCronRuns() : Promise.resolve(new Map()),
       hasDatabase() ? listCronRuns(undefined, limit) : Promise.resolve([]),
       baselineStatus(),
+      listViewHeads(),
     ]);
 
     const now = new Date();
@@ -57,6 +67,8 @@ export async function GET(request: NextRequest) {
       jobs,
       runs,
       baseline,
+      views,
+      viewTier: durableTier(),
       hasDatabase: hasDatabase(),
       fetchedAt: now.toISOString(),
     } satisfies CronStatusResponse);

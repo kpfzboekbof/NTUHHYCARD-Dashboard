@@ -14,7 +14,16 @@ export default function HeatmapPage() {
 
   return (
     <div>
-      <Header title="熱力圖" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} owners={data?.byOwner?.map(o => o.owner) ?? []} />
+      <Header
+        title="熱力圖"
+        fetchedAt={data?.fetchedAt}
+        onRefresh={refresh}
+        isLoading={isLoading}
+        owners={data?.byOwner?.map(o => o.owner) ?? []}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
+      />
       <div className="p-6">
         {isLoading && !data ? (
           <div className="py-20 text-center text-zinc-400">載入中...</div>

@@ -141,7 +141,15 @@ export default function QcPage() {
 
   return (
     <div>
-      <Header title="品質管制" fetchedAt={data?.fetchedAt} onRefresh={refresh} isLoading={isLoading} />
+      <Header
+        title="品質管制"
+        fetchedAt={data?.fetchedAt}
+        onRefresh={refresh}
+        isLoading={isLoading}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
+      />
 
       <div className="p-6 space-y-6">
         {error && (

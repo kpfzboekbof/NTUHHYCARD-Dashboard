@@ -5,6 +5,8 @@ import { ALL_ROLES, type Role } from '@/lib/auth/session';
 import {
   createPerson, listPeople, updatePerson, type PersonInput,
 } from '@/lib/people/repo';
+import { invalidateViews } from '@/lib/views/view';
+import { VIEW } from '@/lib/views/keys';
 
 /**
  * The people registry — manager only.
@@ -82,6 +84,8 @@ export async function POST(request: Request) {
     }
 
     const person = await createPerson(input, auth.identity.actor);
+    // The owners page joins people in at build time.
+    await invalidateViews([VIEW.ownersProgress]);
     return NextResponse.json({ person });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -138,6 +142,7 @@ export async function PATCH(request: Request) {
     if (typeof body.active === 'boolean') changes.active = body.active;
 
     const person = await updatePerson(body.id, changes, auth.identity.actor);
+    await invalidateViews([VIEW.ownersProgress]);
     return NextResponse.json({ person });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

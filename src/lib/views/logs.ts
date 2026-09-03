@@ -1,0 +1,49 @@
+import { defineView, readView, type ViewContext, type ViewDefinition } from './view';
+import { DEPENDENTS, VIEW } from './keys';
+import { fetchLogging } from '@/lib/redcap/client';
+import { transformLogs } from '@/lib/redcap/transform';
+import type { LogEntry } from '@/types';
+
+/**
+ * REDCap's record log, transformed, one view per look-back window.
+ *
+ * Read by the productivity page, the QC behaviour checks and the owners'
+ * activity columns; the three used to fetch it separately.
+ */
+
+const views = new Map<number, ViewDefinition<LogEntry[]>>();
+
+export function redcapLogsView(months: number): ViewDefinition<LogEntry[]> {
+  let view = views.get(months);
+  if (!view) {
+    const key = VIEW.redcapLogs(months);
+    view = defineView<LogEntry[]>({
+      key,
+      freshSeconds: 900,
+      exportsFromRedcap: true,
+      dependents: DEPENDENTS[key],
+      async build() {
+        return transformLogs(await fetchLogging(months));
+      },
+    });
+    views.set(months, view);
+  }
+  return view;
+}
+
+/**
+ * The log for a window, or nothing.
+ *
+ * The log is what activity and credit columns are made of; losing it costs
+ * those columns, never the progress numbers, so a failed export here is
+ * reported as an empty log rather than raised.
+ */
+export async function redcapLogs(months: number, ctx: ViewContext): Promise<LogEntry[]> {
+  try {
+    const { data } = await readView(redcapLogsView(months), { force: ctx.force });
+    return data;
+  } catch (error) {
+    console.error(`views: REDCap log (${months} months) unavailable`, error);
+    return [];
+  }
+}

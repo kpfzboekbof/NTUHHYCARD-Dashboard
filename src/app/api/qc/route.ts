@@ -1,77 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchQcRecords, fetchLogging, fetchUsers } from '@/lib/redcap/client';
+import { fetchQcRecords } from '@/lib/redcap/client';
+import { getRedcapUsers } from '@/lib/redcap/users';
 import { getAssignments } from '@/lib/owner-store';
-import { transformLogs, calcLoggingStats } from '@/lib/redcap/transform';
-import { fetchCompletionStatus, fetchCoreAssistantStatus, fetchOutcomeStatus } from '@/lib/redcap/client';
-import { transformCompletion } from '@/lib/redcap/transform';
+import { calcLoggingStats } from '@/lib/redcap/transform';
 import { runRecordChecks, runBehaviorChecks } from '@/lib/redcap/qc-checks';
-import type { CompletionResponse, User, QcResponse } from '@/types';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
+import { defineView, readView, viewPayload } from '@/lib/views/view';
+import { VIEW } from '@/lib/views/keys';
+import { completionRows } from '@/lib/views/completion';
+import { redcapLogs } from '@/lib/views/logs';
+import type { QcResponse } from '@/types';
 
-const CACHE_KEY = 'qc';
-const USERS_CACHE_KEY = 'redcap_users';
+/**
+ * GET /api/qc — record-level and behaviour-level QC flags.
+ *
+ * One REDCap export of its own (the QC field set), plus the completion and
+ * log views it shares with the other pages.
+ */
 
-export async function GET(request: NextRequest) {
-  try {
-    const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 
-    const cached = !noCache ? await getCachedAsync<QcResponse>(CACHE_KEY) : undefined;
-    if (cached) {
-      return NextResponse.json(cached);
-    }
+const LOG_MONTHS = 3;
 
-    const assignments = await getAssignments();
+const qcView = defineView<QcResponse>({
+  key: VIEW.qc,
+  freshSeconds: 900,
+  exportsFromRedcap: true,
 
-    let users = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-    if (!users) {
-      const rawUsers = await fetchUsers();
-      users = rawUsers.map(u => ({
-        username: u.username,
-        name: `${u.lastname}${u.firstname}`,
-      }));
-      setCached(USERS_CACHE_KEY, users, 1800);
-    }
+  async build(ctx) {
+    const [assignments, users] = await Promise.all([getAssignments(), getRedcapUsers(ctx.force)]);
 
-    // Fetch QC records and run record-level checks
-    const qcRows = await fetchQcRecords();
-    const recordFlags = runRecordChecks(qcRows);
+    const recordFlags = runRecordChecks(await fetchQcRecords());
 
-    // Fetch logging data for behavior checks
-    const rawLogs = await fetchLogging(3);
-    const logs = transformLogs(rawLogs);
-
-    // Need completion data for productivity stats
-    let completionRows = (await getCachedAsync<CompletionResponse>('completion'))?.rows;
-    if (!completionRows) {
-      const [raw, coreAssistantStatus, outcomeStatus] = await Promise.all([
-        fetchCompletionStatus(),
-        fetchCoreAssistantStatus(),
-        fetchOutcomeStatus(),
-      ]);
-      completionRows = transformCompletion(raw, assignments, users, {
-        coreAssistant: coreAssistantStatus,
-        outcomeAssistant: outcomeStatus.assistantStatus,
-        outcomeEtiologyFinal: outcomeStatus.etiologyFinalStatus,
-      });
-    }
-
-    const stats = calcLoggingStats(logs, completionRows, 3, assignments, users);
+    const [logs, rows] = await Promise.all([
+      redcapLogs(LOG_MONTHS, ctx),
+      completionRows(ctx),
+    ]);
+    const stats = calcLoggingStats(logs, rows, LOG_MONTHS, assignments, users);
     const behaviorFlags = runBehaviorChecks(
       logs.map(l => ({ timestamp: l.timestamp, username: l.username })),
       stats.byOwner,
     );
 
-    const data: QcResponse = {
+    return {
       recordFlags,
       behaviorFlags,
-      redcapBaseUrl: await getDataEntryBase(),
+      redcapBaseUrl: await getDataEntryBase(ctx.force),
       fetchedAt: new Date().toISOString(),
     };
+  },
+});
 
-    setCached(CACHE_KEY, data, 300);
-    return NextResponse.json(data);
+export async function GET(request: NextRequest) {
+  try {
+    const force = request.nextUrl.searchParams.get('noCache') === '1';
+    const result = await readView(qcView, { force });
+    return NextResponse.json(viewPayload(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

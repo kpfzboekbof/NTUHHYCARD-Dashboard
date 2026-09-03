@@ -35,8 +35,8 @@ function buildBase(version: string, pid: string): string {
 }
 
 /** Base data-entry URL, cached for a day. Callers append `&id=…&page=…`. */
-export async function getDataEntryBase(): Promise<string> {
-  const cached = await getCachedAsync<string>(CACHE_KEY);
+export async function getDataEntryBase(force = false): Promise<string> {
+  const cached = force ? undefined : await getCachedAsync<string>(CACHE_KEY);
   if (cached) return cached;
 
   try {

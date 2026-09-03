@@ -8,19 +8,42 @@ import type { AdjudicationSummary } from './types.ts';
 const catalog = buildSeedCatalog();
 const units = catalog.units;
 
-function snapshot(main: Record<string, string>, repeats: Record<string, string[]> = {}): RecordSnapshot {
-  return { studyId: '5123', main: { exclusion: '0', ...main }, repeats };
+/**
+ * `instances` defaults to one row per repeating field seen: the common case
+ * of "this patient has N rows, each with a _complete", written as one array.
+ */
+function snapshot(
+  main: Record<string, string>,
+  repeats: Record<string, string[]> = {},
+  instances?: Record<string, number>,
+): RecordSnapshot {
+  const inferred: Record<string, number> = {};
+  for (const [field, values] of Object.entries(repeats)) {
+    const form = field.replace(/_complete$/, '');
+    inferred[form] = Math.max(inferred[form] ?? 0, values.length);
+  }
+  return { studyId: '5123', main: { exclusion: '0', ...main }, repeats, instances: instances ?? inferred };
 }
 
-function statesOf(main: Record<string, string>, repeats?: Record<string, string[]>, adjudication?: AdjudicationSummary) {
-  const derived = deriveRecord(snapshot(main, repeats), { units, adjudication });
+function statesOf(
+  main: Record<string, string>,
+  repeats?: Record<string, string[]>,
+  adjudication?: AdjudicationSummary,
+  instances?: Record<string, number>,
+) {
+  const derived = deriveRecord(snapshot(main, repeats, instances), { units, adjudication });
   const map = new Map<string, WorkState>();
   for (const cell of derived.cells) map.set(cell.unitId, cell.state);
   return { map, derived };
 }
 
-function cellOf(unitId: string, main: Record<string, string>, repeats?: Record<string, string[]>) {
-  const derived = deriveRecord(snapshot(main, repeats), { units });
+function cellOf(
+  unitId: string,
+  main: Record<string, string>,
+  repeats?: Record<string, string[]>,
+  instances?: Record<string, number>,
+) {
+  const derived = deriveRecord(snapshot(main, repeats, instances), { units });
   return derived.cells.find(c => c.unitId === unitId)!;
 }
 
@@ -64,7 +87,79 @@ test('repeat instruments keep the max _complete, as the old pipeline did', () =>
   assert.equal(completeValue(snap, 'ntuh_nhi_patient_complete'), '2');
 });
 
+/* ── repeating instruments ───────────────────────────────── */
+
+test('a time series is done at one row and carries its count, never a verdict', () => {
+  // No _complete is consulted: there is no moment at which a patient's ICU
+  // labs are "finished", only a discharge after which there are no more.
+  const none = cellOf('ntuh_nhi_lab_icu', { sur_icu: '1' });
+  assert.equal(none.state, 'ready');
+  assert.equal(none.instances, 0, 'zero is a number here, not an absence');
+
+  const some = cellOf('ntuh_nhi_lab_icu', { sur_icu: '1' }, {}, { ntuh_nhi_lab_icu: 27 });
+  assert.equal(some.state, 'complete');
+  assert.equal(some.instances, 27);
+});
+
+test('an event form needs every row complete, not just one', () => {
+  const both = cellOf('ntuh_nhi_op', { op_examcheck: '2' }, { ntuh_nhi_op_complete: ['2', '2'] });
+  assert.equal(both.state, 'complete');
+  assert.equal(both.instances, 2);
+
+  // One written up, one not: the old MAX called this complete.
+  const half = cellOf('ntuh_nhi_op', { op_examcheck: '2' }, { ntuh_nhi_op_complete: ['2', '0'] });
+  assert.equal(half.state, 'in_progress');
+
+  const untouched = cellOf('ntuh_nhi_op', { op_examcheck: '2' }, { ntuh_nhi_op_complete: ['0', '0'] });
+  assert.equal(untouched.state, 'ready');
+});
+
+test("a row whose _complete was never set still counts against 'all'", () => {
+  // `repeats` skips blanks, so this row leaves no value behind — only the
+  // instance count knows it exists. Comparing against values seen would call
+  // one finished row out of two "complete".
+  const cell = cellOf('ntuh_nhi_op', { op_examcheck: '2' }, { ntuh_nhi_op_complete: ['2'] }, { ntuh_nhi_op: 2 });
+  assert.equal(cell.state, 'in_progress');
+  assert.equal(cell.instances, 2);
+});
+
+test('forms that do not repeat carry no count', () => {
+  assert.equal(cellOf('ntuh_nhi_patient', { ntuh_nhi_patient_complete: '2' }).instances, undefined);
+});
+
 /* ── applicability ───────────────────────────────────────── */
+
+test('an exam form follows the exam checklist: blank blocks, 沒有 excludes, 有 applies', () => {
+  const blank = cellOf('ntuh_exam_cag', {});
+  assert.equal(blank.state, 'blocked');
+  assert.deepEqual(blank.blockReason, {
+    kind: 'awaiting_gate', field: 'cag_examcheck', enteredByUnit: 'ntuh_nhi_examcheck',
+  });
+
+  assert.equal(cellOf('ntuh_exam_cag', { cag_examcheck: '0' }).state, 'not_applicable');
+  assert.equal(cellOf('ntuh_exam_cag', { cag_examcheck: '1' }).state, 'ready');
+  assert.equal(cellOf('ntuh_exam_cag', { cag_examcheck: '3' }).state, 'ready');
+});
+
+test('a placeholder "none" row on a patient the checklist excludes changes nothing', () => {
+  // Five thousand of these exist per exam form from before the checklist.
+  // They are not work, and they must not be counted as work done either.
+  const cell = cellOf('ntuh_exam_cag', { cag_examcheck: '0' }, { ntuh_exam_cag_complete: ['2'] });
+  assert.equal(cell.state, 'not_applicable');
+});
+
+test('in-hospital CPR: DNR on arrival and prehospital ROSC mean no event to record', () => {
+  const applies = { initial_dnr_core: '0', prehos_rosc_core: '0' };
+  assert.equal(cellOf('ntuh_nhi_core_cpr', applies).state, 'ready');
+  assert.equal(cellOf('ntuh_nhi_core_cpr', { ...applies, initial_dnr_core: '1' }).state, 'not_applicable');
+  assert.equal(cellOf('ntuh_nhi_core_cpr', { ...applies, prehos_rosc_core: '2' }).state, 'not_applicable');
+  // Code 1 is "had ROSC and lost it again" — that patient needs CPR.
+  assert.equal(cellOf('ntuh_nhi_core_cpr', { ...applies, prehos_rosc_core: '1' }).state, 'ready');
+
+  const blank = cellOf('ntuh_nhi_core_cpr', { initial_dnr_core: '0' });
+  assert.equal(blank.state, 'blocked');
+  assert.equal(blank.blockReason?.kind, 'awaiting_gate');
+});
 
 test('ICU forms do not apply when the patient never reached ICU', () => {
   const { map } = statesOf({ sur_icu: '0' });
@@ -213,7 +308,8 @@ test('a broken unit blocks only itself, not the whole record', () => {
       ? { ...u, applicability: { expr: 'studyIdNum', gatingFields: [] } }
       : u,
   );
-  const derived = deriveRecord(snapshot({ ntuh_nhi_lab_ed_complete: '2' }), { units: broken });
+  // lab_ed counts rows now, so it completes on a repeat row, not a main value.
+  const derived = deriveRecord(snapshot({}, { ntuh_nhi_lab_ed_complete: ['2'] }), { units: broken });
 
   const bad = derived.cells.find(c => c.unitId === 'ntuh_nhi_patient')!;
   assert.equal(bad.state, 'blocked');

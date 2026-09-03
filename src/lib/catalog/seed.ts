@@ -7,7 +7,7 @@ import {
   CORE_ASSISTANT_CHECKBOX_FIELDS,
   OUTCOME_ASSISTANT_REQUIRED_FIELDS,
 } from '@/config/forms';
-import type { CatalogDoc, CatalogSettings, WorkUnit } from './types';
+import type { CatalogDoc, CatalogSettings, CompletionRule, WorkUnit } from './types';
 
 /**
  * Builds the catalog that reproduces today's behaviour exactly.
@@ -135,8 +135,58 @@ const REPLACEMENTS: Record<string, SpecialUnit> = {
   },
 };
 
+/**
+ * Exam forms are gated on the patient's exam checklist.
+ *
+ * `ntuh_nhi_examcheck` records, per patient, which reports exist in the chart
+ * at all — one radio per exam type, `0 沒有 | 1 有(OHCA前) | 2 有(OHCA後) | 3 前後都有`.
+ * That answers the question the exam forms' own `_complete` never could: does
+ * this form have anything to be entered for this patient? The tri-state does
+ * the rest — blank blocks the exam form on the checklist, `0` makes it not
+ * applicable, anything else makes it due.
+ *
+ * Measured before this was wired in: CAG had rows for 6,456 patients while the
+ * checklist said 1,342 had a catheterisation. The other five thousand were
+ * placeholder rows saying "none" — a workflow from before the checklist
+ * existed. The old `target: 1500` was a hand-guess at that 1,342.
+ */
+const EXAMCHECK_FIELD: Record<string, string> = {
+  ntuh_exam_cag: 'cag_examcheck',
+  ntuh_exam_ct: 'ct_examcheck',
+  ntuh_exam_ucg: 'us_ucg_examcheck',
+  ntuh_exam_abd_echo: 'us_abdomen_examcheck',
+  ntuh_exam_pes: 'scope_pes_examcheck',
+  ntuh_exam_colon: 'scope_colon_examcheck',
+  ntuh_nhi_op: 'op_examcheck',
+  ntuh_exam_patho: 'patho_examcheck',
+  ntuh_exam_lft_2: 'lft_examcheck',
+  ntuh_exam_eeg: 'eeg_examcheck',
+};
+
+function examGate(field: string): WorkUnit['applicability'] {
+  return {
+    expr: `${field} != '0'`,
+    gatingFields: [{ field, enteredByUnit: 'ntuh_nhi_examcheck', aggregation: 'main' }],
+  };
+}
+
 /** Applicability rules that live inline in transformCompletion today. */
 const APPLICABILITY: Record<string, WorkUnit['applicability']> = {
+  ...Object.fromEntries(Object.entries(EXAMCHECK_FIELD).map(([form, field]) => [form, examGate(field)])),
+
+  // In-hospital CPR is recorded per event. A patient who arrived already
+  // under a do-not-resuscitate order, or with a pulse (prehospital ROSC — code
+  // 2; code 1 is "had ROSC and lost it again", who does need CPR), has no such
+  // event, so the form does not apply rather than sitting unfinished forever.
+  // Both gates are the core assistant's fields.
+  ntuh_nhi_core_cpr: {
+    expr: "initial_dnr_core != '1' && prehos_rosc_core != '2'",
+    gatingFields: [
+      { field: 'initial_dnr_core', enteredByUnit: 'core.assistant', aggregation: 'main' },
+      { field: 'prehos_rosc_core', enteredByUnit: 'core.assistant', aggregation: 'main' },
+    ],
+  },
+
   ntuh_nhi_lab_icu: {
     expr: "sur_icu == '1'",
     gatingFields: [{ field: 'sur_icu', enteredByUnit: 'outcome.assistant', aggregation: 'main' }],
@@ -155,6 +205,38 @@ const APPLICABILITY: Record<string, WorkUnit['applicability']> = {
     // the trauma form applies when any labeler classified the case as trauma.
     gatingFields: [{ field: 'cause_all_etiology_new', enteredByUnit: 'etiology.vote', aggregation: 'any' }],
   },
+};
+
+/**
+ * Completion rules for the repeating instruments that a plain `_complete` MAX
+ * misjudges. Every other full form keeps `complete_field` with the default
+ * 'any' fold, which is the old behaviour exactly.
+ *
+ * Time series (ED labs, ICU labs, post-arrest vitals): there is no moment at
+ * which these are "complete", only a discharge after which there will be no
+ * more rows. The registry lead's rule is that an applicable patient must have
+ * at least one row; beyond that the count is shown, not judged.
+ *
+ * Event forms (one row per procedure): every row must be complete. Three
+ * surgeries with one written up is not a finished surgery form. Measured
+ * impact when this was decided: 91 patients on patho, 64 on op, 28 on CPR,
+ * six or fewer on each of the rest.
+ */
+const COMPLETION: Record<string, CompletionRule> = {
+  ntuh_nhi_lab_ed: { type: 'instance_count', min: 1 },
+  ntuh_nhi_lab_icu: { type: 'instance_count', min: 1 },
+  ntuh_nhi_postarrest_vital: { type: 'instance_count', min: 1 },
+
+  ...Object.fromEntries(
+    [
+      'ntuh_nhi_core_cpr', 'ntuh_exam_cag', 'ntuh_exam_ucg', 'ntuh_exam_abd_echo',
+      'ntuh_exam_pes', 'ntuh_exam_colon', 'ntuh_nhi_op', 'ntuh_exam_patho',
+      'ntuh_exam_lft_2', 'ntuh_exam_eeg', 'ntuh_exam_ct',
+    ].map(form => [
+      form,
+      { type: 'complete_field', completeField: `${form}_complete`, repeatAggregation: 'all' } satisfies CompletionRule,
+    ]),
+  ),
 };
 
 /**
@@ -200,7 +282,7 @@ export function buildSeedCatalog(): CatalogDoc {
       redcapForm: form.name,
       deepLinkPage: form.name,
       kind: 'full_form',
-      completionRule: { type: 'complete_field', completeField: `${form.name}_complete` },
+      completionRule: COMPLETION[form.name] ?? { type: 'complete_field', completeField: `${form.name}_complete` },
       applicability: APPLICABILITY[form.name] ?? { expr: 'true', gatingFields: [] },
       dependencies: [],
       category,

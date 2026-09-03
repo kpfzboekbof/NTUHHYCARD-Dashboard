@@ -766,7 +766,8 @@ GET  /api/cron/metadata            每日：data dictionary + project info + use
 **快取策略**：快照制（Blob 原始 + Redis matrix）取代脆弱的共享 node-cache/clearAllCache；失效範圍化；SWR 輪詢節奏、可見更新時間戳、手動重新抓取全部保留。
 
 **已知限制（明示的設計決策，非疏漏）**：
-- Repeat instrument 的 `_complete` 聚合維持 MAX（一個 instance complete 即整表 complete）——為相容性保留；病人詳情頁顯示 instance 計數供人工判讀。若未來要收緊，改 catalog completionRule 增加 `repeatAggregation: 'min'|'max'` 即可，不動架構。
+- **Repeat instrument 的完成語意（Phase 5 已收緊）**：目錄的 completionRule 現在分三種——(a) 非重複表單與預設：`complete_field` 的 `repeatAggregation: 'any'`，即舊的 MAX；(b) 一筆一事件的重複表單（CPR、手術、病理、各檢查表）：`repeatAggregation: 'all'`，每一筆都完成才算完成（實測影響 patho 91 人、op 64 人、CPR 28 人，其餘 ≤ 6）；(c) 時序表單（Lab ED、Lab ICU、Postarrest Vital）：`instance_count: { min: 1 }`，「完成」對這種表沒有意義——沒有一個時間點是病人的 vital sign 收集完畢了，只有出院後不會再有——所以只要求適用病人至少一筆，格子帶筆數，畫面顯示「有資料 N 筆」而非完成。**仍然看不到的**：該有 30 筆卻只鍵了 1 筆——REDCap 沒有從未建立的 instance 的紀錄，任何 `_complete` 規則都救不了；若要稽核，錨點是 ICU 天數對筆數的合理性檢查，登錄者尚未給出「每天一筆」之類的規則，故未做。
+- **檢查表的適用性來自 `ntuh_nhi_examcheck`**：每位病人一張非重複的檢查清單，每種檢查一個 radio（`0 沒有 | 1 有(OHCA前) | 2 有(OHCA後) | 3 前後都有`）。十張檢查表以 `<x>_examcheck != '0'` 作 gate：空白 → 被擋住（等 examcheck）、0 → 不適用、其餘 → 適用。這才是「該表單完成到全數病人的比例」的分母（CAG 為 1,342 人，不是 7,051）。上線前實測：examcheck 已填 97.4%；每張檢查表有 3,500–5,800 筆「沒有做」的 placeholder instance 來自 examcheck 之前的工作流程，在新規則下從所有計數消失（資料不動）；examcheck 說沒有、檢查表卻填了有做的矛盾在 CAG 只有 6 人，留給 QC 規則。`ntuh_nhi_core_cpr` 同理以 `initial_dnr_core != '1' && prehos_rosc_core != '2'` 作 gate（prehospital ROSC 是代碼 2；代碼 1 是曾 ROSC 又停、仍需 CPR）。
 - QC 僅評估主列（non-repeat row）——維持現行；etiology 投票品質由 §11 的投票計數修正與未知代碼警示涵蓋。
 - REDCap log 歸屬粒度是「record+form 的存檔事件」——同窗口兩人編輯同表可能誤歸屬；僅用於生產力（永不影響狀態），無法歸屬者誠實顯示。
 - **REDCap 原生稽核仍歸單一 token 帳號**：所有 Dashboard 回寫在 REDCap 自己的 log 裡永遠掛在共享 REDCAP_TOKEN 帳號名下；本設計以 dashboard 端 `audit_log`（含 payload hash）補償。**未來選項（本版不做、留紀錄）**：向 REDCap 管理者申請逐人 API token，或在專案加一個 `dashboard_actor` 註記欄位隨回寫寫入——屆時只需改 `src/lib/redcap/client.ts` 的單一寫入路徑。

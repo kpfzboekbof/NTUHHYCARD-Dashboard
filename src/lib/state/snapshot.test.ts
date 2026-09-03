@@ -29,6 +29,14 @@ test('field set covers every field the catalog reads', () => {
   // Read only by a variant condition — the easiest field to forget, and the
   // one that decides which prehospital fields the assistant owes.
   assert.ok(fields.has('er_arrival'));
+
+  // Exam checklist gates
+  assert.ok(fields.has('cag_examcheck'));
+  assert.ok(fields.has('initial_dnr_core'));
+
+  // A row-counting unit still has to ask for a field on its instrument, or
+  // REDCap returns no rows to count.
+  assert.ok(fields.has('ntuh_nhi_lab_icu_complete'));
 });
 
 test('field set is sorted and deduplicated', () => {
@@ -70,4 +78,22 @@ test('redcap bookkeeping columns are not treated as data', () => {
     { study_id: '1', redcap_repeat_instrument: '', redcap_repeat_instance: '', hospital: '0' },
   ]);
   assert.deepEqual(Object.keys(snapshot.main).sort(), ['hospital', 'study_id']);
+});
+
+test('rows are counted per repeating instrument, blank fields included', () => {
+  const [snapshot] = buildSnapshots([
+    { study_id: '1', redcap_repeat_instrument: '', exclusion: '0' },
+    { study_id: '1', redcap_repeat_instrument: 'ntuh_nhi_lab_icu', ntuh_nhi_lab_icu_complete: '2' },
+    { study_id: '1', redcap_repeat_instrument: 'ntuh_nhi_lab_icu', ntuh_nhi_lab_icu_complete: '' },
+    { study_id: '1', redcap_repeat_instrument: 'ntuh_nhi_op', ntuh_nhi_op_complete: '0' },
+  ]);
+  // The blank row leaves nothing in `repeats` — which is exactly why the
+  // count is kept separately.
+  assert.deepEqual(snapshot.instances, { ntuh_nhi_lab_icu: 2, ntuh_nhi_op: 1 });
+  assert.deepEqual(snapshot.repeats.ntuh_nhi_lab_icu_complete, ['2']);
+});
+
+test('a record with no repeat rows has an empty count, not a missing one', () => {
+  const [snapshot] = buildSnapshots([{ study_id: '1', redcap_repeat_instrument: '', exclusion: '0' }]);
+  assert.deepEqual(snapshot.instances, {});
 });

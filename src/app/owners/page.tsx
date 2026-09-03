@@ -91,7 +91,7 @@ function CreditNote({ row }: { row: OwnerRow }) {
 
 function OwnerDetail({ row }: { row: OwnerRow }) {
   return (
-    <td colSpan={9} className="bg-zinc-50 px-6 py-4 dark:bg-zinc-900">
+    <td colSpan={8} className="bg-zinc-50 px-6 py-4 dark:bg-zinc-900">
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
           <h4 className="mb-2 text-xs font-semibold text-zinc-500">逐單元</h4>
@@ -99,10 +99,11 @@ function OwnerDetail({ row }: { row: OwnerRow }) {
             <thead>
               <tr className="text-left text-zinc-400">
                 <th className="pb-1">單元</th>
-                <th className="pb-1 text-right">完成/可動工</th>
+                <th className="pb-1 text-right">完成/適用</th>
                 <th className="pb-1 text-right">可開始</th>
                 <th className="pb-1 text-right">待確認</th>
                 <th className="pb-1 text-right">被擋住</th>
+                <th className="pb-1 text-right">不適用</th>
               </tr>
             </thead>
             <tbody>
@@ -115,6 +116,7 @@ function OwnerDetail({ row }: { row: OwnerRow }) {
                   <td className="py-1 text-right tabular-nums">{unit.ready}</td>
                   <td className="py-1 text-right tabular-nums">{unit.awaitingVerify}</td>
                   <td className="py-1 text-right tabular-nums text-zinc-400">{unit.blocked}</td>
+                  <td className="py-1 text-right tabular-nums text-zinc-300">{unit.notApplicable}</td>
                 </tr>
               ))}
             </tbody>
@@ -246,6 +248,71 @@ function OwnersBoard() {
             )}
 
             <Card>
+              <CardHeader>
+                <CardTitle>每張表</CardTitle>
+                <p className="text-xs text-zinc-500">
+                  分母是這張表適用的病人：檢查表看 examcheck 說有做的人，ICU 表看住進 ICU 的人。
+                  「不適用」是這張表對他根本不會有的病人，兩邊都不算。
+                </p>
+              </CardHeader>
+              <CardContent className="overflow-x-auto p-0">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-zinc-500">
+                      <th className="p-2 pl-4">表單</th>
+                      <th className="p-2">負責人</th>
+                      <th className="p-2 text-right">完成 / 適用</th>
+                      <th className="p-2">完成率</th>
+                      <th className="p-2 text-right">可開始</th>
+                      <th className="p-2 text-right" title="上游還沒給資料，不是這張表的負責人的事">被擋住</th>
+                      <th className="p-2 text-right" title="這張表對這些病人根本不會有">不適用</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.units.map(unit => {
+                      const countsRows = unit.ruleType === 'instance_count';
+                      return (
+                        <tr key={unit.unitId} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                          <td className="p-2 pl-4">
+                            <Link className="font-medium hover:underline" href={`/incomplete?unit=${unit.unitId}`}>{unit.label}</Link>
+                            {countsRows && (
+                              <span className="ml-1.5 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800" title="時序資料：看有沒有筆數，不看「完成」">
+                                筆數制
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2">
+                            {unit.owner ? (
+                              <span className={unit.owner.nameSource === 'unknown' ? 'text-red-600' : ''} title={unit.owner.nameSource !== 'registry' ? NAME_SOURCE_NOTE[unit.owner.nameSource] : undefined}>
+                                {unit.owner.displayName}
+                              </span>
+                            ) : (
+                              <Link className="text-red-600 hover:underline" href="/assign">未指派</Link>
+                            )}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">
+                            {countsRows ? (
+                              <span title={`有資料的病人數 / 適用病人數；共 ${(unit.rows ?? 0).toLocaleString()} 筆`}>
+                                有資料 {(unit.patientsWithRows ?? 0).toLocaleString()} / {unit.workable.toLocaleString()}
+                                <span className="ml-1 text-xs text-zinc-400">共 {(unit.rows ?? 0).toLocaleString()} 筆</span>
+                              </span>
+                            ) : (
+                              <>{unit.done.toLocaleString()} / {unit.workable.toLocaleString()}</>
+                            )}
+                          </td>
+                          <td className="p-2"><Bar pct={unit.pct} /></td>
+                          <td className="p-2 text-right tabular-nums">{unit.ready.toLocaleString()}</td>
+                          <td className="p-2 text-right tabular-nums text-zinc-400">{unit.blocked.toLocaleString()}</td>
+                          <td className="p-2 text-right tabular-nums text-zinc-300">{unit.notApplicable.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+
+            <Card>
               <CardHeader><CardTitle>每個人</CardTitle></CardHeader>
               <CardContent className="overflow-x-auto p-0">
                 <table className="w-full text-sm">
@@ -254,7 +321,6 @@ function OwnersBoard() {
                       <th className="p-2 pl-4">負責人</th>
                       <th className="p-2">成績</th>
                       <th className="p-2">完成率</th>
-                      <th className="p-2 text-right">完成/可動工</th>
                       <th className="p-2 text-right">可開始</th>
                       <th className="p-2 text-right">待確認</th>
                       <th className="p-2 text-right" title="不是他的錯，不計入成績">被擋住</th>
@@ -293,7 +359,6 @@ function OwnersBoard() {
                               )}
                             </td>
                             <td className="p-2"><Bar pct={row.pct} /></td>
-                            <td className="p-2 text-right tabular-nums">{row.completedTotal.toLocaleString()}/{row.applicableTotal.toLocaleString()}</td>
                             <td className="p-2 text-right tabular-nums">{row.readyCount.toLocaleString()}</td>
                             <td className="p-2 text-right tabular-nums">{row.awaitingVerifyCount.toLocaleString()}</td>
                             <td className="p-2 text-right tabular-nums text-zinc-400">{row.blockedCount.toLocaleString()}</td>
@@ -430,6 +495,7 @@ function OwnersBoard() {
 
             <p className="text-xs text-zinc-400">
               成績 = 已完成 ÷ 適用且未被擋住的項目。被擋住與不適用的項目兩邊都不計。
+              檢查表以 examcheck 決定適不適用；時序表（Lab、Vital）看有沒有筆數，不看「完成」；一筆一事件的表要每一筆都完成。
               助理表單填完待醫師簽核時，對助理算完成、對醫師算未完成。
               「落後」除了成績低，還要有項目真的擱著超過 {data.settings.staleDays} 天。
               REDCap 日誌範圍：{data.activity.exportStart ? `${taipeiDate(data.activity.exportStart)} 起` : '無資料'}

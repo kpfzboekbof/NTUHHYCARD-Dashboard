@@ -7,7 +7,7 @@ import { listPeople, type Person } from '@/lib/people/repo';
 import { lastNudgeByPerson } from '@/lib/db/outbound-mail';
 import { readySinceByCell } from '@/lib/db/events';
 import { redcapDirectory } from '@/lib/state/backlog-source';
-import { computeProgress, type PersonProgress } from '@/lib/state/progress';
+import { computeProgress, computeUnitTotals, type PersonProgress } from '@/lib/state/progress';
 import { attributeCredit, summarizeActivity, type OwnerCredit } from '@/lib/state/activity';
 import { groupByBlocker, groupByBlockerPerOwner, type BlockerGroup } from '@/lib/state/blockers';
 import { ownersForUnits } from '@/lib/state/ownership';
@@ -98,6 +98,7 @@ const ownersProgressView = defineView({
       redcapForm: unit.redcapForm,
       deepLinkPage: unit.deepLinkPage,
       kind: catalogById.get(unit.unitId)?.kind ?? 'full_form',
+      ruleType: catalogById.get(unit.unitId)?.completionRule.type,
     }));
     const { records } = matrix.data;
 
@@ -152,6 +153,9 @@ const ownersProgressView = defineView({
 
     return {
       people: rows,
+      // The form-first view: each unit against its own population, owner
+      // attached, unassigned rows included.
+      units: computeUnitTotals({ records, units, assignments, people, directory }),
       unassigned,
       blockers: groupByBlocker(blockerInput),
       attribution: {

@@ -50,9 +50,14 @@ function validateCompletionRule(unit: WorkUnit, issues: CatalogIssue[]): void {
     verify: ['verify'],
     derived_field: ['derived_field'],
     adjudication: ['adjudication'],
+    instance_count: ['full_form'],
   };
   if (!expectedKind[rule.type]?.includes(unit.kind)) {
     issues.push({ unitId: unit.unitId, message: `kind「${unit.kind}」與完成規則「${rule.type}」不相符` });
+  }
+
+  if (rule.type === 'instance_count' && (!Number.isInteger(rule.min) || rule.min < 1)) {
+    issues.push({ unitId: unit.unitId, message: `instance_count 的 min 必須是至少 1 的整數（現在是 ${rule.min}）` });
   }
 
   if (rule.type === 'required_fields') {
@@ -205,6 +210,7 @@ export function findUnknownFields(catalog: CatalogDoc, knownFields: Set<string>)
 
     const rule = unit.completionRule;
     if (rule.type === 'complete_field' || rule.type === 'verify') referenced.add(rule.completeField);
+    if (rule.type === 'instance_count') referenced.add(`${unit.redcapForm}_complete`);
     if (rule.type === 'derived_field') referenced.add(rule.watchField);
     if (rule.type === 'required_fields') {
       for (const variant of rule.variants) for (const field of variant.fields) referenced.add(field);

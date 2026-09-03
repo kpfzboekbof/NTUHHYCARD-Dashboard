@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeProgress, type ProgressPersonRef, type ProgressUnitRef } from './progress.ts';
+import { computeProgress, computeUnitTotals, type ProgressPersonRef, type ProgressUnitRef } from './progress.ts';
 import type { CellState, RecordDerivation, WorkState } from './types.ts';
 
 /**
@@ -229,4 +229,77 @@ test('the worst score sorts first, and ungradeable owners sort last', () => {
     ],
   });
   assert.deepEqual(result.map(p => p.displayName), ['王小明', '李小華']);
+});
+
+/* ── per-unit totals ─────────────────────────────────────── */
+
+test('a form is measured against its own population, not the registry', () => {
+  // ICU-only: two patients apply, one is done. Three patients never apply
+  // and are counted as such rather than dragging the fraction down.
+  const [unit] = computeUnitTotals({
+    units: [ASSISTANT], assignments: { 'unit.a': 'ALICE' }, people: [ALICE],
+    records: [
+      record('1', [{ unitId: 'unit.a', state: 'complete' }]),
+      record('2', [{ unitId: 'unit.a', state: 'ready' }]),
+      record('3', [{ unitId: 'unit.a', state: 'not_applicable' }]),
+      record('4', [{ unitId: 'unit.a', state: 'not_applicable' }]),
+      record('5', [{ unitId: 'unit.a', state: 'not_applicable' }]),
+    ],
+  });
+  assert.equal(unit.workable, 2);
+  assert.equal(unit.done, 1);
+  assert.equal(unit.pct, 50);
+  assert.equal(unit.notApplicable, 3);
+  assert.equal(unit.owner?.displayName, '王小明');
+});
+
+test('an unassigned form still gets a row — that is the row that matters', () => {
+  const [unit] = computeUnitTotals({
+    units: [ASSISTANT], assignments: {}, people: [],
+    records: [record('1', [{ unitId: 'unit.a', state: 'ready' }])],
+  });
+  assert.equal(unit.owner, null);
+  assert.equal(unit.ready, 1);
+});
+
+test('a row-counting unit reports rows and patients with rows', () => {
+  const labs: ProgressUnitRef & { ruleType: string } = {
+    unitId: 'unit.lab', label: 'Lab ICU', kind: 'full_form', ruleType: 'instance_count',
+  };
+  const [unit] = computeUnitTotals({
+    units: [labs], assignments: {}, people: [],
+    records: [
+      { ...record('1', [{ unitId: 'unit.lab', state: 'complete' }]), cells: [{ studyId: '1', unitId: 'unit.lab', state: 'complete', instances: 27 }] },
+      { ...record('2', [{ unitId: 'unit.lab', state: 'ready' }]), cells: [{ studyId: '2', unitId: 'unit.lab', state: 'ready', instances: 0 }] },
+      { ...record('3', [{ unitId: 'unit.lab', state: 'not_applicable' }]), cells: [{ studyId: '3', unitId: 'unit.lab', state: 'not_applicable' }] },
+    ],
+  });
+  assert.equal(unit.ruleType, 'instance_count');
+  assert.equal(unit.rows, 27);
+  assert.equal(unit.patientsWithRows, 1);
+  assert.equal(unit.pct, 50);
+});
+
+test('units whose cells carry no count report null, not zero', () => {
+  const [unit] = computeUnitTotals({
+    units: [ASSISTANT], assignments: {}, people: [],
+    records: [record('1', [{ unitId: 'unit.a', state: 'complete' }])],
+  });
+  assert.equal(unit.rows, null);
+  assert.equal(unit.patientsWithRows, null);
+});
+
+test('the per-person expand and the per-unit table count the same cells', () => {
+  const records = [
+    record('1', [{ unitId: 'unit.a', state: 'complete' }, { unitId: 'unit.v', state: 'blocked' }]),
+    record('2', [{ unitId: 'unit.a', state: 'not_applicable' }, { unitId: 'unit.v', state: 'complete' }]),
+  ];
+  const input = { units: [ASSISTANT, DOCTOR], assignments: { 'unit.a': 'ALICE', 'unit.v': 'ALICE' }, people: [ALICE], records };
+  const [person] = computeProgress(input);
+  for (const total of computeUnitTotals(input)) {
+    const mine = person.units.find(u => u.unitId === total.unitId)!;
+    for (const key of ['ready', 'blocked', 'complete', 'notApplicable', 'workable', 'done'] as const) {
+      assert.equal(total[key], mine[key], `${total.unitId}.${key}`);
+    }
+  }
 });

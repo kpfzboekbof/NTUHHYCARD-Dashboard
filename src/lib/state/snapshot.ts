@@ -43,6 +43,13 @@ export function catalogFieldSet(catalog: CatalogDoc): string[] {
       case 'adjudication':
         // Votes come from the etiology transform, not from this export.
         break;
+      case 'instance_count':
+        // REDCap only returns a repeating instrument's rows when a field on
+        // it is requested; `_complete` exists on every instrument and is the
+        // cheapest thing to ask for. The value is ignored — only the row count
+        // matters — but without it there would be no rows to count.
+        fields.add(`${unit.redcapForm}_complete`);
+        break;
     }
   }
 
@@ -65,11 +72,16 @@ export function buildSnapshots(rows: RedcapRow[]): RecordSnapshot[] {
 
     let snapshot = byId.get(studyId);
     if (!snapshot) {
-      snapshot = { studyId, main: {}, repeats: {} };
+      snapshot = { studyId, main: {}, repeats: {}, instances: {} };
       byId.set(studyId, snapshot);
     }
 
-    const isRepeat = (row.redcap_repeat_instrument ?? '') !== '';
+    const instrument = row.redcap_repeat_instrument ?? '';
+    const isRepeat = instrument !== '';
+    // Counted before the field loop: a row still exists when every requested
+    // field on it is blank, and the loop below would never see it.
+    if (isRepeat) snapshot.instances[instrument] = (snapshot.instances[instrument] ?? 0) + 1;
+
     for (const [field, value] of Object.entries(row)) {
       if (field.startsWith('redcap_')) continue;
       if (value === '') continue;

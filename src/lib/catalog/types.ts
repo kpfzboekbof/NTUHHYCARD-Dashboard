@@ -36,12 +36,34 @@ export interface ConsensusRule {
   dissenterMajorityMin: number;
 }
 
+/**
+ * How a repeating instrument's `_complete` values fold into one answer.
+ *
+ * 'any' — one complete instance completes the form. What the old pipeline
+ *         did (a MAX over the rows), kept as the default so forms that do not
+ *         repeat, and repeating forms nobody has asked to tighten, behave
+ *         exactly as before.
+ * 'all' — every instance must be complete. Right for event forms where each
+ *         row is a distinct procedure: three surgeries with one written up is
+ *         not a finished surgery form.
+ */
+export type RepeatAggregation = 'any' | 'all';
+
 export type CompletionRule =
-  | { type: 'complete_field'; completeField: string }
+  | { type: 'complete_field'; completeField: string; repeatAggregation?: RepeatAggregation }
   | { type: 'required_fields'; variants: RequiredFieldVariant[] }
-  | { type: 'verify'; completeField: string }
+  | { type: 'verify'; completeField: string; repeatAggregation?: RepeatAggregation }
   | { type: 'derived_field'; watchField: string }
-  | { type: 'adjudication'; consensusRule: ConsensusRule };
+  | { type: 'adjudication'; consensusRule: ConsensusRule }
+  /**
+   * Done when the patient has at least `min` rows of the unit's instrument,
+   * whatever their `_complete` says. For time-series instruments — ICU labs,
+   * post-arrest vitals — where "complete" has no meaning: there is no moment
+   * at which a patient's vital signs are finished, only a discharge after which
+   * there will be no more. The cell carries the count so the view can say
+   * "27 rows" rather than a green tick that claims more than anyone knows.
+   */
+  | { type: 'instance_count'; min: number };
 
 /**
  * How to read a field off a record.

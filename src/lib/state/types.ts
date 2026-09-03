@@ -37,6 +37,13 @@ export interface CellState {
   unitId: string;
   state: WorkState;
   blockReason?: BlockReason;
+  /**
+   * How many rows of the unit's repeating instrument this patient has. Present
+   * only for units whose rule reads instances (see `CompletionRule`), and then
+   * always — zero included — so a repeat form with nothing entered is
+   * distinguishable from a form that does not repeat.
+   */
+  instances?: number;
 }
 
 export interface RecordDerivation {
@@ -73,4 +80,10 @@ export interface RecordSnapshot {
   studyId: string;
   main: Record<string, string>;
   repeats: Record<string, string[]>;
+  /**
+   * Rows per repeating instrument, keyed by REDCap form name. `repeats` alone
+   * cannot say this: it holds values, and skips empty ones, so a row whose
+   * only requested field is blank leaves no trace there.
+   */
+  instances: Record<string, number>;
 }

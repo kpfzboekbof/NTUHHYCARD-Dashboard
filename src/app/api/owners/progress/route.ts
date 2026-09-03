@@ -11,7 +11,7 @@ import { lastNudgeByPerson } from '@/lib/db/outbound-mail';
 import { readySinceByCell } from '@/lib/db/events';
 import { deriveCurrentMatrix, type UnitMeta } from '@/lib/state/build';
 import { redcapDirectory } from '@/lib/state/backlog-source';
-import { computeProgress, type PersonProgress } from '@/lib/state/progress';
+import { computeProgress, computeUnitTotals, type PersonProgress } from '@/lib/state/progress';
 import { attributeCredit, summarizeActivity, type OwnerCredit } from '@/lib/state/activity';
 import { groupByBlocker, groupByBlockerPerOwner, type BlockerGroup } from '@/lib/state/blockers';
 import { ownersForUnits } from '@/lib/state/ownership';
@@ -113,6 +113,7 @@ async function build() {
     redcapForm: unit.redcapForm,
     deepLinkPage: unit.deepLinkPage,
     kind: catalogById.get(unit.unitId)?.kind ?? 'full_form',
+    ruleType: catalogById.get(unit.unitId)?.completionRule.type,
   }));
 
   const { byUsername: activity, exportStart } = summarizeActivity(logs, {
@@ -166,6 +167,9 @@ async function build() {
 
   return {
     people: rows,
+    // The form-first view: each unit against its own population, owner
+    // attached, unassigned rows included.
+    units: computeUnitTotals({ records: matrix.records, units, assignments, people, directory }),
     unassigned,
     blockers: groupByBlocker(blockerInput),
     attribution: {

@@ -1,5 +1,5 @@
 import { evaluate, parseExpr, type ExprContext, type Node, type Tri } from '@/lib/catalog/expr';
-import type { CompletionRule, WorkUnit } from '@/lib/catalog/types';
+import type { CompletionRule, RepeatAggregation, WorkUnit } from '@/lib/catalog/types';
 import type {
   AdjudicationSummary,
   BlockReason,
@@ -44,6 +44,45 @@ export function completeValue(snapshot: RecordSnapshot, field: string): string {
     if (best === '' || Number(value) > Number(best)) best = value;
   }
   return best;
+}
+
+/**
+ * The _complete verdict for a form, folding repeat rows per the rule.
+ *
+ * Under 'all', the count of rows marked complete is compared with the count
+ * of rows that exist — not with the count of values seen. `repeats` skips
+ * blanks, so a row whose _complete was never set is invisible there, and
+ * "every value I can see is 2" would call a half-written form finished.
+ */
+function completeVerdict(
+  snapshot: RecordSnapshot,
+  field: string,
+  form: string,
+  aggregation: RepeatAggregation,
+): WorkState {
+  const rows = snapshot.instances[form] ?? 0;
+  if (aggregation === 'all' && rows > 0) {
+    const done = (snapshot.repeats[field] ?? []).filter(value => value === '2').length;
+    if (done === rows) return 'complete';
+    // Below the top the ladder is the same one 'any' climbs: a row marked
+    // Unverified or Complete means somebody is partway through; rows still at
+    // Incomplete (REDCap's default on save) or blank are not started. The two
+    // modes differ only in what counts as the top.
+    const highest = completeValue(snapshot, field);
+    return highest === '1' || highest === '2' ? 'in_progress' : 'ready';
+  }
+
+  const value = completeValue(snapshot, field);
+  if (value === '2') return 'complete';
+  if (value === '1') return 'in_progress';
+  return 'ready';
+}
+
+/** Whether this unit's rule reads repeat rows, and so its cell should carry a count. */
+function readsInstances(unit: WorkUnit): boolean {
+  const rule = unit.completionRule;
+  return rule.type === 'instance_count'
+    || ((rule.type === 'complete_field' || rule.type === 'verify') && rule.repeatAggregation !== undefined);
 }
 
 function isFilled(snapshot: RecordSnapshot, field: string, checkboxFields: Set<string>): boolean {
@@ -106,11 +145,17 @@ function completionState(
 
   switch (rule.type) {
     case 'complete_field':
-    case 'verify': {
-      const value = completeValue(snapshot, rule.completeField);
-      if (value === '2') return { state: 'complete' };
-      if (value === '1') return { state: 'in_progress' };
-      return { state: 'ready' };
+    case 'verify':
+      return {
+        state: completeVerdict(snapshot, rule.completeField, unit.redcapForm, rule.repeatAggregation ?? 'any'),
+      };
+
+    case 'instance_count': {
+      const rows = snapshot.instances[unit.redcapForm] ?? 0;
+      if (rows >= rule.min) return { state: 'complete' };
+      // Below the minimum but not empty only arises for min > 1; nothing at
+      // all is the ordinary "still to be entered".
+      return { state: rows > 0 ? 'in_progress' : 'ready' };
     }
 
     case 'required_fields': {
@@ -274,7 +319,13 @@ export function deriveRecord(snapshot: RecordSnapshot, options: DeriveOptions): 
   }
 
   function derive(unit: WorkUnit): CellState {
-    const base = { studyId: snapshot.studyId, unitId: unit.unitId };
+    const base: Pick<CellState, 'studyId' | 'unitId' | 'instances'> = {
+      studyId: snapshot.studyId,
+      unitId: unit.unitId,
+    };
+    // Zero included: a repeat form with nothing entered must not look like a
+    // form that does not repeat.
+    if (readsInstances(unit)) base.instances = snapshot.instances[unit.redcapForm] ?? 0;
     const ctx = makeExprContext(snapshot, unit, batchCutoff);
 
     const applicable = evaluate(compile(unit.applicability.expr), ctx);

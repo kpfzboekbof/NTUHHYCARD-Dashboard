@@ -1,5 +1,5 @@
 import { indexByUsername, ownersForUnits, resolveOwner } from './ownership';
-import type { NameSource, PersonRef } from './ownership';
+import type { NameSource, PersonRef, ResolvedOwner } from './ownership';
 import type { RecordDerivation, WorkState } from './types';
 import type { OwnerAssignments } from '@/types';
 
@@ -48,6 +48,8 @@ export interface UnitProgress {
   awaitingVerify: number;
   blocked: number;
   complete: number;
+  /** Patients this unit does not apply to at all. */
+  notApplicable: number;
   /** Applicable and not blocked — the denominator this unit contributes. */
   workable: number;
   /** Counts as done for this owner (see VERIFY_KINDS). */
@@ -104,8 +106,24 @@ function emptyUnitProgress(unit: ProgressUnitRef): UnitProgress {
     unitId: unit.unitId,
     label: unit.label,
     ready: 0, inProgress: 0, awaitingVerify: 0, blocked: 0, complete: 0,
-    workable: 0, done: 0,
+    notApplicable: 0, workable: 0, done: 0,
   };
+}
+
+/** Which states a cell counts towards, shared by the per-person and per-unit tallies. */
+function tallyCell(progress: UnitProgress, state: WorkState, kind: string): void {
+  switch (state) {
+    case 'ready': progress.ready++; break;
+    case 'in_progress': progress.inProgress++; break;
+    case 'entered_awaiting_verify': progress.awaitingVerify++; break;
+    case 'blocked': progress.blocked++; break;
+    case 'complete': progress.complete++; break;
+    case 'not_applicable': progress.notApplicable++; return;
+  }
+  // Blocked is applicable but not theirs to move, so it stays out of the
+  // denominator as well as the numerator.
+  if (state !== 'blocked') progress.workable++;
+  if (countsAsDone(state, kind)) progress.done++;
 }
 
 /**
@@ -160,19 +178,7 @@ export function computeProgress(input: ProgressInput): PersonProgress[] {
       let progress = unitMap.get(cell.unitId);
       if (!progress) unitMap.set(cell.unitId, progress = emptyUnitProgress(unit));
 
-      switch (cell.state) {
-        case 'ready': progress.ready++; break;
-        case 'in_progress': progress.inProgress++; break;
-        case 'entered_awaiting_verify': progress.awaitingVerify++; break;
-        case 'blocked': progress.blocked++; break;
-        case 'complete': progress.complete++; break;
-        case 'not_applicable': continue;
-      }
-
-      // Blocked is applicable but not theirs to move, so it stays out of the
-      // denominator as well as the numerator.
-      if (cell.state !== 'blocked') progress.workable++;
-      if (countsAsDone(cell.state, unit.kind)) progress.done++;
+      tallyCell(progress, cell.state, unit.kind);
 
       if (cell.state === 'ready' && readySince) {
         const since = readySince.get(`${record.studyId}|${cell.unitId}`);
@@ -220,4 +226,75 @@ export function computeProgress(input: ProgressInput): PersonProgress[] {
   }
 
   return result.sort((a, b) => (a.pct ?? 101) - (b.pct ?? 101));
+}
+
+/**
+ * The same tallies per unit across the whole registry, owner attached.
+ *
+ * The per-person view answers "how is this person doing"; this answers the
+ * question the registry lead actually asks first — "how far along is this
+ * form" — with the form's own population as the denominator. A person's
+ * cross-form total (28,300 of 30,413) mixes a form 7,051 patients need with
+ * one 2,209 need and means nothing physical; per form, each number does.
+ */
+
+export interface UnitTotals extends UnitProgress {
+  kind: string;
+  /** The completion rule's type, so a row-counting unit can be rendered as such. */
+  ruleType: string | null;
+  /** Null when nobody is assigned — the row still shows, that is the point. */
+  owner: ResolvedOwner | null;
+  /** done ÷ workable, or null when nothing is workable. */
+  pct: number | null;
+  /** Repeat rows across all patients; null for units whose cells carry no count. */
+  rows: number | null;
+  /** Patients with at least one row; null likewise. */
+  patientsWithRows: number | null;
+}
+
+export interface UnitTotalsInput {
+  records: RecordDerivation[];
+  units: Array<ProgressUnitRef & { ruleType?: string }>;
+  assignments: OwnerAssignments;
+  people: ProgressPersonRef[];
+  directory?: Map<string, string>;
+}
+
+export function computeUnitTotals(input: UnitTotalsInput): UnitTotals[] {
+  const { records, units, assignments, people, directory } = input;
+  const personByUsername = indexByUsername(people);
+  const ownerByUnit = ownersForUnits(units, assignments);
+
+  const totals = new Map<string, UnitTotals>();
+  for (const unit of units) {
+    const username = ownerByUnit.get(unit.unitId);
+    totals.set(unit.unitId, {
+      ...emptyUnitProgress(unit),
+      kind: unit.kind,
+      ruleType: unit.ruleType ?? null,
+      owner: username ? resolveOwner(username, personByUsername, directory) : null,
+      pct: null,
+      rows: null,
+      patientsWithRows: null,
+    });
+  }
+
+  for (const record of records) {
+    for (const cell of record.cells) {
+      const total = totals.get(cell.unitId);
+      if (!total) continue;
+      tallyCell(total, cell.state, total.kind);
+      if (cell.instances !== undefined) {
+        total.rows = (total.rows ?? 0) + cell.instances;
+        total.patientsWithRows = (total.patientsWithRows ?? 0) + (cell.instances > 0 ? 1 : 0);
+      }
+    }
+  }
+
+  // Input order is catalog order — the workflow — which is how people find a
+  // form. The percentage column is there for anyone sorting by trouble.
+  return [...totals.values()].map(total => ({
+    ...total,
+    pct: total.workable > 0 ? Math.round((total.done / total.workable) * 1000) / 10 : null,
+  }));
 }

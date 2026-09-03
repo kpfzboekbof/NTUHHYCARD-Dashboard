@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { CronStatusResponse } from '@/app/api/admin/cron-runs/route';
 import type { JobStatus } from '@/lib/cron/health';
+import { leaseActive } from '@/lib/views/policy';
 
 /**
  * 系統狀態 — whether the background jobs are actually running.
@@ -219,6 +220,69 @@ function SystemBoard() {
             </Card>
 
             <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">衍生視圖快照</CardTitle>
+                <p className="text-xs text-zinc-500">
+                  每個頁面背後的推導結果最後一次成功的時間。頁面永遠先用這份回答，超過更新間隔就在回應之後於背景重跑；
+                  「背景重跑次數」持續累積而時間不動，代表重跑一直被平台在時間上限砍掉——到該頁按「重新抓取」在前景重跑。
+                  儲存層：{data.viewTier === 'postgres+blob' ? 'Postgres（中繼資料）＋ Blob（內容）' : data.viewTier === 'redis' ? 'Redis（沒有設定資料庫）' : '僅記憶體'}。
+                </p>
+              </CardHeader>
+              <CardContent className="overflow-x-auto p-0">
+                {data.views.length === 0 ? (
+                  <p className="p-6 text-sm text-zinc-500">還沒有任何視圖被建立過（或沒有設定資料庫）。</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-zinc-500">
+                        <th className="p-2 pl-4">視圖</th>
+                        <th className="p-2">最後成功推導</th>
+                        <th className="p-2 text-right">大小</th>
+                        <th className="p-2">狀態</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.views.filter(v => !v.key.startsWith('__')).map(view => {
+                        const ageMinutes = view.fetchedAt ? Math.round((Date.now() - new Date(view.fetchedAt).getTime()) / 60_000) : null;
+                        // The lease rule the reader applies: past 300 s a
+                        // rebuild that never landed is presumed dead, and
+                        // 「重推導中」 would be a promise nobody is keeping.
+                        const attemptMinutes = view.refreshStartedAt
+                          ? Math.round((Date.now() - new Date(view.refreshStartedAt).getTime()) / 60_000)
+                          : null;
+                        const refreshingSince = leaseActive(view.refreshStartedAt, 300, Date.now()) ? attemptMinutes : null;
+                        const lastAttempt = refreshingSince === null ? attemptMinutes : null;
+                        return (
+                          <tr key={view.key} className="border-b">
+                            <td className="p-2 pl-4 font-mono text-xs">{view.key}</td>
+                            <td className="p-2">
+                              {view.fetchedAt ? (
+                                <span>{taipeiTime(view.fetchedAt)} <span className="text-xs text-zinc-400">（{ageMinutes} 分鐘前）</span></span>
+                              ) : <span className="text-zinc-400">從未</span>}
+                            </td>
+                            <td className="p-2 text-right tabular-nums text-zinc-500">
+                              {view.bytes ? `${(view.bytes / 1024).toFixed(0)} KB` : '—'}
+                            </td>
+                            <td className="p-2 text-xs">
+                              {view.invalidatedAt && <span className="mr-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300">有寫入待重推導</span>}
+                              {refreshingSince !== null && <span className="mr-2 rounded bg-blue-100 px-1.5 py-0.5 text-blue-800 dark:bg-blue-950 dark:text-blue-300">重推導中（{refreshingSince} 分鐘）</span>}
+                              {lastAttempt !== null && <span className="mr-2 text-zinc-400">上次嘗試 {lastAttempt} 分鐘前未落地</span>}
+                              {view.refreshAttempts > 0 && (
+                                <span className={`rounded px-1.5 py-0.5 ${view.refreshAttempts >= 3 ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>
+                                  背景重跑 {view.refreshAttempts} 次未落地
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
               <CardHeader className="pb-2"><CardTitle className="text-base">執行紀錄</CardTitle></CardHeader>
               <CardContent className="overflow-x-auto p-0">
                 {data.runs.length === 0 ? (
@@ -274,7 +338,7 @@ function SystemBoard() {
 
 export default function SystemPage() {
   return (
-    <AdminGate>
+    <AdminGate prefetch={['/api/admin/cron-runs']}>
       <SystemBoard />
     </AdminGate>
   );

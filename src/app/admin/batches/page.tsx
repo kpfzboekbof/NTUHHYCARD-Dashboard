@@ -423,7 +423,7 @@ function BatchCard({ batch, lastNudge, onChanged }: {
 
 export default function BatchesPage() {
   return (
-    <AdminGate>
+    <AdminGate prefetch={['/api/batches']}>
       <BatchesView />
     </AdminGate>
   );

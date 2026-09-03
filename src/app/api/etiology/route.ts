@@ -1,39 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedAsync, setCached, clearAllCache } from '@/lib/cache';
-import { fetchEtiologyStatus, importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
-import { getLabelers } from '@/lib/labelers';
-import { getDataEntryBase } from '@/lib/redcap/deep-link';
-import { transformEtiology } from '@/lib/redcap/etiology-transform';
+import { importEtiologyFinal, batchImportField } from '@/lib/redcap/client';
 import { requireRole } from '@/lib/auth/identity';
 import { recordAudit, recordAuditMany } from '@/lib/db/audit';
-import type { EtiologyResponse } from '@/lib/redcap/etiology-transform';
+import { invalidateViews, readView, viewPayload } from '@/lib/views/view';
+import { etiologyView } from '@/lib/views/etiology';
+import { WRITE_EFFECTS } from '@/lib/views/keys';
 
-const CACHE_KEY = 'etiology';
+export const runtime = 'nodejs';
+// The background rebuild scheduled by readView runs inside this budget.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   try {
-    const noCache = request.nextUrl.searchParams.get('noCache') === '1';
-    if (noCache) clearAllCache();
-
-    const cached = !noCache ? await getCachedAsync<EtiologyResponse>(CACHE_KEY) : undefined;
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-
-    const labelers = await getLabelers();
-    const rawRows = await fetchEtiologyStatus();
-    const { records, stats } = transformEtiology(rawRows, labelers);
-
-    const data: EtiologyResponse = {
-      records,
-      stats,
-      labelers,
-      redcapBaseUrl: await getDataEntryBase(),
-      fetchedAt: new Date().toISOString(),
-    };
-
-    setCached(CACHE_KEY, data, 300);
-    return NextResponse.json(data);
+    const force = request.nextUrl.searchParams.get('noCache') === '1';
+    const result = await readView(etiologyView, { force });
+    return NextResponse.json(viewPayload(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -60,7 +41,9 @@ export async function POST(request: NextRequest) {
       }
       const records = cleaned.map(u => ({ study_id: u.studyId, etiology_final: String(u.code) }));
       const { imported, missing } = await batchImportField(records);
-      clearAllCache();
+      // Only the views this write touches — the etiology view rebuilds before
+      // its next answer, the matrix and completion refresh in the background.
+      await invalidateViews(WRITE_EFFECTS.etiologyFinal);
 
       // Audit what REDCap confirmed, one row per record: "who set 5123's
       // etiology_final to 7, and when" is the question this answers.
@@ -84,8 +67,7 @@ export async function POST(request: NextRequest) {
 
     await importEtiologyFinal(studyId, code);
 
-    // Clear etiology cache so next fetch reflects the change
-    clearAllCache();
+    await invalidateViews(WRITE_EFFECTS.etiologyFinal);
 
     await recordAudit({
       actor: auth.identity.actor,

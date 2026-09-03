@@ -40,6 +40,7 @@ const OWNED_TABLES = new Set([
   'outbound_mail',
   'batch',
   'cron_run',
+  'derived_snapshot',
 ]);
 
 const client = new Client(url);

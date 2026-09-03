@@ -97,7 +97,67 @@ export interface User {
 
 export type OwnerAssignments = Record<string, string>;
 
-export interface CompletionResponse {
+/**
+ * Freshness of a derived view (src/lib/views): every heavy API answers from
+ * the last snapshot it has and refreshes behind the response.
+ */
+export interface ViewMeta {
+  /** When the snapshot being served was derived from REDCap. */
+  fetchedAt: string;
+  /** Older than the view's freshness window; a refresh has been requested. */
+  stale?: boolean;
+  /** A rebuild is running right now — poll and the next answer may be newer. */
+  refreshing?: boolean;
+  /** Background rebuilds keep dying; only 重新抓取 will move this view now. */
+  refreshFailed?: boolean;
+}
+
+/** One form's column in the packed completion matrix. */
+export interface PackedForm {
+  form: string;
+  label: string;
+  owner: string;
+}
+
+/**
+ * One record: [studyId, hospital code, excluded (1/0), statuses].
+ *
+ * `statuses` holds one character per entry of `forms`, in order: '0' | '1' |
+ * '2' for the completion code, '-' where the form does not apply to this
+ * record (so no row exists for it).
+ */
+export type PackedRecord = [string, number, 0 | 1, string];
+
+/**
+ * The completion matrix as sent over the wire and kept in the cache.
+ *
+ * `CompletionRow[]` repeats the study id, hospital name, form name, label,
+ * owner and status text on every one of ~190,000 cells — tens of megabytes
+ * of JSON per page load. This carries the same information in under half a
+ * megabyte; `unpackCompletion` restores the rows the components consume.
+ */
+export interface PackedCompletion {
+  forms: PackedForm[];
+  records: PackedRecord[];
+}
+
+/** What the completion API returns and what the server caches. */
+export interface CompletionPayload extends ViewMeta {
+  packed: PackedCompletion;
+  byForm: FormStats[];
+  byOwner: OwnerStats[];
+  users: User[];
+  assignments: OwnerAssignments;
+  hiddenForms: string[];
+  targetIds: { basic: number | null; exam: number | null };
+  totalRecords: number;
+  validOhcaCount: number;
+  /** Data-entry deep-link base, built from REDCap's reported version. */
+  redcapBaseUrl: string;
+}
+
+/** The completion API as the client components see it, rows unpacked. */
+export interface CompletionResponse extends ViewMeta {
   rows: CompletionRow[];
   byForm: FormStats[];
   byOwner: OwnerStats[];
@@ -109,14 +169,12 @@ export interface CompletionResponse {
   validOhcaCount: number;
   /** Data-entry deep-link base, built from REDCap's reported version. */
   redcapBaseUrl: string;
-  fetchedAt: string;
 }
 
-export interface LoggingResponse {
+export interface LoggingResponse extends ViewMeta {
   byOwner: OwnerProductivity[];
   byOwnerForm: OwnerFormProgress[];
   timeline: WeeklyTimeline[];
-  fetchedAt: string;
 }
 
 export interface QcRecordFlag {
@@ -137,10 +195,9 @@ export interface QcBehaviorFlag {
   message: string;
 }
 
-export interface QcResponse {
+export interface QcResponse extends ViewMeta {
   recordFlags: QcRecordFlag[];
   behaviorFlags: QcBehaviorFlag[];
-  fetchedAt: string;
   /** Data-entry deep-link base, built from REDCap’s reported version. */
   redcapBaseUrl: string;
 }

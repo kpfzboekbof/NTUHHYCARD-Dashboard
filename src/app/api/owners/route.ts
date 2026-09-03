@@ -1,37 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getCachedAsync, setCached } from '@/lib/cache';
 import { requireRole } from '@/lib/auth/identity';
 import { recordAudit } from '@/lib/db/audit';
-import { fetchUsers } from '@/lib/redcap/client';
-import { getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
+import { getRedcapUsers } from '@/lib/redcap/users';
+import { readOwnerStore, getAssignments, setAssignments, getHiddenForms, setHiddenForms, getTargetIds, setTargetIds } from '@/lib/owner-store';
 import { getLabelers, setLabelers } from '@/lib/labelers';
+import { invalidateViews } from '@/lib/views/view';
+import { WRITE_EFFECTS } from '@/lib/views/keys';
 import type { Labeler } from '@/lib/redcap/etiology-transform';
 import type { TargetIds } from '@/lib/owner-store';
-import type { User, OwnerAssignments } from '@/types';
-
-const USERS_CACHE_KEY = 'redcap_users';
-
-async function getUsers(): Promise<User[]> {
-  const cached = await getCachedAsync<User[]>(USERS_CACHE_KEY);
-  if (cached) return cached;
-
-  const raw = await fetchUsers();
-  const users: User[] = raw.map(u => ({
-    username: u.username,
-    name: `${u.lastname}${u.firstname}`,
-  }));
-
-  setCached(USERS_CACHE_KEY, users, 1800);
-  return users;
-}
+import type { OwnerAssignments } from '@/types';
 
 export async function GET() {
   try {
-    const [users, assignments, hiddenForms, targetIds, labelers] = await Promise.all([
-      getUsers(),
-      getAssignments(),
-      getHiddenForms(),
-      getTargetIds(),
+    const [users, { assignments, hiddenForms, targetIds }, labelers] = await Promise.all([
+      getRedcapUsers(),
+      readOwnerStore(),
       getLabelers(),
     ]);
     return NextResponse.json({ users, assignments, hiddenForms, targetIds, labelers });
@@ -99,6 +82,10 @@ export async function PUT(request: Request) {
         after: body.labelers,
       });
     }
+
+    // Owners, hidden forms, targets and labelers are baked into every
+    // REDCap-derived view; mark them so they rebuild.
+    await invalidateViews(WRITE_EFFECTS.settings);
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

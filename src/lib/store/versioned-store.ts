@@ -1,3 +1,5 @@
+import { getRedis, redisEnabled } from '@/lib/redis';
+
 /**
  * Versioned JSON store shared by the app-state blobs (owner assignments,
  * labelers, meeting settings).
@@ -47,7 +49,6 @@ interface StoreOptions<T> {
   normalize: (raw: unknown) => T;
 }
 
-const isVercel = !!process.env.VERCEL;
 const MAX_UPDATE_ATTEMPTS = 4;
 
 /**
@@ -71,18 +72,15 @@ redis.call('SET', KEYS[1], ARGV[2])
 return -1
 `;
 
+/**
+ * The shared per-instance connection (src/lib/redis.ts). Throws when Redis
+ * cannot be reached so `read` can report the failure as version -1 rather than
+ * mistake it for an empty store.
+ */
 async function withRedis<R>(fn: (client: import('ioredis').Redis) => Promise<R>): Promise<R> {
-  const Redis = (await import('ioredis')).default;
-  const client = new Redis(process.env.REDIS_URL || '', {
-    maxRetriesPerRequest: 1,
-    lazyConnect: true,
-  });
-  try {
-    await client.connect();
-    return await fn(client);
-  } finally {
-    client.disconnect();
-  }
+  const client = await getRedis();
+  if (!client) throw new Error('Redis 無法連線');
+  return fn(client);
 }
 
 /**
@@ -126,7 +124,7 @@ export function createVersionedStore<T>(options: StoreOptions<T>): VersionedStor
   }
 
   async function read(): Promise<VersionedDoc<T>> {
-    if (!isVercel) return unwrap(readLocalRaw(), normalize);
+    if (!redisEnabled()) return unwrap(readLocalRaw(), normalize);
     try {
       const raw = await withRedis(client => client.get(redisKey));
       return unwrap(raw ? JSON.parse(raw) : null, normalize);
@@ -141,7 +139,7 @@ export function createVersionedStore<T>(options: StoreOptions<T>): VersionedStor
   async function write(data: T, expectedVersion: number): Promise<VersionedDoc<T>> {
     const next: VersionedDoc<T> = { version: expectedVersion + 1, data };
 
-    if (!isVercel) {
+    if (!redisEnabled()) {
       const current = unwrap(readLocalRaw(), normalize);
       if (current.version !== expectedVersion) {
         throw new VersionConflictError(expectedVersion, current.version);

@@ -1,11 +1,12 @@
 'use client';
 
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { AlertTriangle, ChevronDown, ChevronRight, Mail, MailCheck, UserX } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { AdminGate } from '@/components/admin-gate';
+import { useAdaptiveInterval } from '@/hooks/use-adaptive-interval';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { OwnersProgressResponse, OwnerRow } from '@/app/api/owners/progress/route';
@@ -150,9 +151,11 @@ function OwnerDetail({ row }: { row: OwnerRow }) {
 }
 
 function OwnersBoard() {
+  const [refreshInterval, track] = useAdaptiveInterval(300_000);
   const { data, error, isLoading, mutate } = useSWR('/api/owners/progress', fetcher, {
-    refreshInterval: 300_000,
+    refreshInterval,
   });
+  useEffect(() => track(data?.refreshing), [data?.refreshing, track]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [nudging, setNudging] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
@@ -202,6 +205,9 @@ function OwnersBoard() {
         onRefresh={refresh}
         isLoading={isLoading}
         owners={people.map(p => p.displayName)}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
       />
       <div className="space-y-6 p-6">
         {error && <p className="text-sm text-red-600">讀取失敗：{String(error.message ?? error)}</p>}
@@ -505,7 +511,7 @@ function OwnersBoard() {
 
 export default function OwnersPage() {
   return (
-    <AdminGate>
+    <AdminGate prefetch={['/api/owners/progress']}>
       <OwnersBoard />
     </AdminGate>
   );

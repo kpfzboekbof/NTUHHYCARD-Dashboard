@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import useSWR from 'swr';
+import { useAdaptiveInterval } from './use-adaptive-interval';
 import type { LoggingResponse, Filters } from '@/types';
 
 const fetcher = (url: string) => fetch(url).then(r => r.json());
@@ -15,11 +17,13 @@ function timeRangeToMonths(range: Filters['timeRange']): number {
 
 export function useLoggingData(timeRange: Filters['timeRange'] = '3months') {
   const months = timeRangeToMonths(timeRange);
+  const [refreshInterval, track] = useAdaptiveInterval(600_000);
   const { data, error, isLoading, isValidating, mutate } = useSWR<LoggingResponse>(
     `/api/logging?months=${months}`,
     fetcher,
-    { refreshInterval: 600000 }
+    { refreshInterval },
   );
+  useEffect(() => track(data?.refreshing), [data?.refreshing, track]);
 
   return {
     data,
@@ -27,7 +31,7 @@ export function useLoggingData(timeRange: Filters['timeRange'] = '3months') {
     isLoading: isLoading || isValidating,
     refresh: () => mutate(
       fetcher(`/api/logging?months=${months}&noCache=1`),
-      { revalidate: false }
+      { revalidate: false },
     ),
   };
 }

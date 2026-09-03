@@ -1,11 +1,12 @@
 'use client';
 
-import { Suspense, useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { ExternalLink, Mail, Sparkles } from 'lucide-react';
 import { Header } from '@/components/layout/header';
 import { useFilters } from '@/hooks/use-filters';
+import { useAdaptiveInterval } from '@/hooks/use-adaptive-interval';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { WorkState } from '@/lib/state/types';
@@ -43,6 +44,9 @@ interface MatrixResponse {
   units: MatrixUnit[];
   totals: { records: number; excluded: number; screeningPending: number; fullyComplete: number };
   fetchedAt: string;
+  stale?: boolean;
+  refreshing?: boolean;
+  refreshFailed?: boolean;
   cells: MatrixCell[];
   matched: number;
   offset: number;
@@ -139,11 +143,16 @@ function QueueView() {
   // Server-side: the match must cover the whole slice, not the visible page.
   if (search.trim()) query.set('studyId', search.trim());
 
+  // No polling in the normal case — this page is paged by hand — but while
+  // the matrix is being rebuilt behind the scenes, poll so the fresh state
+  // appears without a click.
+  const [refreshInterval, track] = useAdaptiveInterval(0);
   const { data, error, isLoading, mutate } = useSWR<MatrixResponse>(
     `/api/state/matrix?${query.toString()}`,
     fetcher,
-    { revalidateOnFocus: false },
+    { revalidateOnFocus: false, refreshInterval },
   );
+  useEffect(() => track(data?.refreshing), [data?.refreshing, track]);
 
   const [nudging, setNudging] = useState(false);
   const [nudgeResult, setNudgeResult] = useState('');
@@ -199,6 +208,9 @@ function QueueView() {
         onRefresh={() => mutate()}
         isLoading={isLoading}
         owners={owners}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
       />
       <div className="space-y-4 p-6">
         <Card>
@@ -257,7 +269,7 @@ function QueueView() {
         <Card>
           <CardContent className="overflow-x-auto p-0">
             {isLoading ? (
-              <p className="p-6 text-sm text-zinc-500">推導狀態矩陣中...（第一次或快取過期時約需一分鐘）</p>
+              <p className="p-6 text-sm text-zinc-500">推導狀態矩陣中...（只有第一次沒有任何快照時需要約一分鐘）</p>
             ) : (
               <table className="w-full text-sm">
                 <thead>

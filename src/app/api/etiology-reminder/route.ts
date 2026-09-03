@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchEtiologyStatus } from '@/lib/redcap/client';
+import { readView } from '@/lib/views/view';
+import { etiologyView } from '@/lib/views/etiology';
 import { getLabelers } from '@/lib/labelers';
-import { transformEtiology } from '@/lib/redcap/etiology-transform';
 import { getMeetingSettings, updateMeetingSettings } from '@/lib/meeting-store';
 import { buildReminderEmail } from '@/lib/email-template';
 import { getDataEntryBase } from '@/lib/redcap/deep-link';
@@ -13,6 +13,10 @@ import { requireRole } from '@/lib/auth/identity';
 import { recordAudit } from '@/lib/db/audit';
 import { lastReminderByLabelerCode } from '@/lib/db/outbound-mail';
 import type { EtiologyRecord } from '@/lib/redcap/etiology-transform';
+
+export const runtime = 'nodejs';
+// The etiology view may schedule a rebuild behind the response.
+export const maxDuration = 300;
 
 /** Filter incomplete records by ID range */
 function filterByIdRange(records: EtiologyRecord[], idFrom: number | null, idTo: number | null): EtiologyRecord[] {
@@ -33,9 +37,11 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   try {
-    const [labelers, rawRows, settings, lastReminder] = await Promise.all([
+    // The etiology view: the same records the page shows, without a
+    // REDCap export per visit. It rebuilds before answering after a write.
+    const [labelers, etiology, settings, lastReminder] = await Promise.all([
       getLabelers(),
-      fetchEtiologyStatus(),
+      readView(etiologyView),
       getMeetingSettings(),
       lastReminderByLabelerCode().catch(() => ({} as Record<string, string>)),
     ]);
@@ -46,8 +52,7 @@ export async function GET() {
       (await resolveLabelerTargets(labelers)).map(target => [target.code, target]),
     );
 
-    const { records } = transformEtiology(rawRows, labelers);
-    const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
+    const incompleteRecords = filterByIdRange(etiology.data.records, settings.idFrom, settings.idTo);
 
     const labelerStatus = labelers.map(l => {
       const incompleteCases = incompleteRecords.filter(
@@ -120,9 +125,10 @@ export async function POST(request: NextRequest) {
 
     // Send reminder emails
     if (body.action === 'sendReminder') {
-      const [labelers, rawRows, settings] = await Promise.all([
+      // Mail lists each reviewer's open records: the view must be recent.
+      const [labelers, etiology, settings] = await Promise.all([
         getLabelers(),
-        fetchEtiologyStatus(),
+        readView(etiologyView, { maxAgeSeconds: 600 }),
         getMeetingSettings(),
       ]);
 
@@ -130,8 +136,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '請先設定共識會議日期' }, { status: 400 });
       }
 
-      const { records } = transformEtiology(rawRows, labelers);
-      const incompleteRecords = filterByIdRange(records, settings.idFrom, settings.idTo);
+      const incompleteRecords = filterByIdRange(etiology.data.records, settings.idFrom, settings.idTo);
 
       const baseUrl = await resolveBaseUrl();
       const redcapBaseUrl = await getDataEntryBase();

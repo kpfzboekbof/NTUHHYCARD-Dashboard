@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import useSWR from 'swr';
+import { useAdaptiveInterval } from './use-adaptive-interval';
 import type { QcResponse } from '@/types';
 
 const fetcher = async (url: string): Promise<QcResponse> => {
@@ -11,11 +13,13 @@ const fetcher = async (url: string): Promise<QcResponse> => {
 };
 
 export function useQcData() {
+  const [refreshInterval, track] = useAdaptiveInterval(300_000);
   const { data, error, isLoading, isValidating, mutate } = useSWR<QcResponse>(
     '/api/qc',
     fetcher,
-    { refreshInterval: 300000 }
+    { refreshInterval },
   );
+  useEffect(() => track(data?.refreshing), [data?.refreshing, track]);
 
   return {
     data,
@@ -23,7 +27,7 @@ export function useQcData() {
     isLoading: isLoading || isValidating,
     refresh: () => mutate(
       fetcher('/api/qc?noCache=1'),
-      { revalidate: false }
+      { revalidate: false },
     ),
   };
 }

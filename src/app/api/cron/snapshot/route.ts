@@ -7,6 +7,8 @@ import { insertWorkEvents } from '@/lib/db/events';
 import { hasDatabase } from '@/lib/db/client';
 import { listPeople } from '@/lib/people/repo';
 import { getAssignments } from '@/lib/owner-store';
+import { holdingRedcapLease, storeView } from '@/lib/views/view';
+import { matrixView, summarizeMatrix } from '@/lib/views/matrix';
 
 /**
  * GET /api/cron/snapshot — take a snapshot, diff it against the last one,
@@ -41,7 +43,9 @@ export async function GET(request: Request) {
   const startedAt = Date.now();
 
   return runCronJob('snapshot', request, async () => {
-    const [matrix, baseline] = await Promise.all([deriveWithRetry(), readBaseline()]);
+    // The lease keeps a page's background rebuild from exporting beside this
+    // one; the run itself does not wait on it.
+    const [matrix, baseline] = await Promise.all([holdingRedcapLease(deriveWithRetry), readBaseline()]);
 
     // A partial export can pass the empty-body guard and still be missing
     // half the registry. Records only ever accumulate here, so a collapse
@@ -53,6 +57,11 @@ export async function GET(request: Request) {
         error: `匯出僅 ${matrix.records.length} 筆，基準線有 ${baseline.records.length} 筆——視為 REDCap 匯出失敗，未更新基準線`,
       };
     }
+
+    // The same derivation, stored where the pages read: the morning's first
+    // /incomplete or /owners then costs nothing. Dated from when this run's
+    // export began, as every view build is.
+    await storeView(matrixView, summarizeMatrix(matrix), new Date(startedAt).toISOString());
 
     const events = baseline ? diffMatrices(baseline.records, matrix.records) : [];
 

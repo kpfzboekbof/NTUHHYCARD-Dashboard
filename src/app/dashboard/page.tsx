@@ -29,6 +29,9 @@ export default function DashboardPage() {
         onRefresh={refresh}
         isLoading={isLoading}
         owners={owners}
+        stale={data?.stale}
+        refreshing={data?.refreshing}
+        refreshFailed={data?.refreshFailed}
       />
       <div className="space-y-6 p-6">
         {hasError ? (

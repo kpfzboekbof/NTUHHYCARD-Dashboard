@@ -44,7 +44,8 @@ export async function POST(request: NextRequest) {
     if (!batch) return NextResponse.json({ error: '找不到批次' }, { status: 404 });
 
     const [{ backlog, fetchedAt }, redcapBase] = await Promise.all([
-      loadBacklog({ studyIdCutoff: batch.studyIdCutoff, unitIds: batch.unitIds }),
+      // Mail names people and lists their work: the matrix must be recent.
+      loadBacklog({ studyIdCutoff: batch.studyIdCutoff, unitIds: batch.unitIds }, { maxAgeSeconds: 600 }),
       getDataEntryBase(),
     ]);
 

@@ -21,3 +21,19 @@ export function deadlinePhrase(dueDate: string | null, now: Date = new Date()): 
   if (days === 0) return '今天到期';
   return `還有 ${days} 天`;
 }
+
+/** Day of week in Taipei: 0 Sunday … 6 Saturday. */
+export function taipeiWeekday(now: Date = new Date()): number {
+  return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' })).getDay();
+}
+
+/**
+ * Saturday or Sunday in Taipei. The hospital scrapers do not run at weekends,
+ * so a missing upload on one is a calendar, not a fault. Public holidays are
+ * not covered: there is no holiday table here, and inventing one would be
+ * worse than saying so.
+ */
+export function isTaipeiWeekend(now: Date = new Date()): boolean {
+  const day = taipeiWeekday(now);
+  return day === 0 || day === 6;
+}

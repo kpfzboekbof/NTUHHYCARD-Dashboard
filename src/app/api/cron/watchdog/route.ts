@@ -5,6 +5,7 @@ import { listPeople } from '@/lib/people/repo';
 import { hasDatabase } from '@/lib/db/client';
 import { createTransporter, escapeHtml } from '@/lib/mailer';
 import { alreadySentToday, recordMailAttempt, markMailFailed, markMailSent } from '@/lib/db/outbound-mail';
+import { isTaipeiWeekend } from '@/lib/deadline';
 
 /**
  * GET /api/cron/watchdog — the one thing that may interrupt the operator.
@@ -72,6 +73,11 @@ async function checkBaseline(): Promise<Alert | null> {
 }
 
 async function checkScans(): Promise<Alert | null> {
+  // The scrapers do not run at weekends. Two Saturday-and-Sunday alerts went
+  // out before this line existed, each announcing that nothing had been
+  // uploaded on a day nothing was ever going to be.
+  if (isTaipeiWeekend()) return null;
+
   const now = taipeiNow();
   // Before the deadline a missing file is just a morning; say nothing.
   if (now.getHours() < 9 + SCAN_GRACE_HOURS) return null;
@@ -107,19 +113,30 @@ async function checkScans(): Promise<Alert | null> {
   };
 }
 
-/** The operator's address: the first active manager in the registry, else the sender itself. */
+/**
+ * Where system alerts go: the system's own mailbox, or ALERT_EMAIL when set.
+ *
+ * This used to pick "the first active manager in the registry", which is the
+ * first manager alphabetically — and the day a second manager was added, two
+ * days of alerts went to a colleague instead of the operator. Alphabetical
+ * order is not a definition of who runs the system; the mailbox the system
+ * sends from is. The registry is consulted only to attach a person id to the
+ * ledger row when that address belongs to somebody in it.
+ */
 async function alertRecipient(): Promise<{ personId: string | null; email: string } | null> {
+  const email = process.env.ALERT_EMAIL || process.env.GMAIL_USER;
+  if (!email) return null;
+
+  let personId: string | null = null;
   if (hasDatabase()) {
     try {
-      const people = await listPeople();
-      const manager = people.find(p => p.roles.includes('manager') && p.email);
-      if (manager) return { personId: manager.id, email: manager.email };
+      const match = (await listPeople()).find(p => p.email.toLowerCase() === email.toLowerCase());
+      personId = match?.id ?? null;
     } catch {
-      // fall through to the mailbox itself
+      // A ledger without a person id is still a ledger.
     }
   }
-  const self = process.env.GMAIL_USER;
-  return self ? { personId: null, email: self } : null;
+  return { personId, email };
 }
 
 export async function GET(request: Request) {

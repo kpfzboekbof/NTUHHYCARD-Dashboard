@@ -34,6 +34,7 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 | `SCREENING_API_TOKEN` | 院內 scraper 上傳用的 Bearer token |
 | `REPORT_API_TOKEN` | 外部 PA 週報 routine 拉取 `/api/report/weekly` |
 | `GMAIL_USER`、`GMAIL_APP_PASSWORD` | 共識會議提醒信、催辦信、看門狗警報 |
+| `ALERT_EMAIL` | （選用）看門狗系統警報的收件人；未設定時寄給 `GMAIL_USER` 本身。警報**不會**寄給人員名單裡的任何人 |
 | `APP_BASE_URL` | 信件內連結的站台位址（登入連結必須有此設定或 Vercel 自動變數，不接受請求標頭） |
 | `CRON_SECRET` | Vercel Cron 呼叫 `/api/cron/*` 的 Bearer token（Vercel 會自動帶上）；未設定時排程端點只接受 manager session |
 | `SNAPSHOT_STALE_HOURS` | 快照多久沒更新算停擺（看門狗用，預設 30） |

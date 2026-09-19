@@ -38,6 +38,7 @@ Next.js 16 與訓練資料中的版本有出入（middleware 已改名 proxy 等
 | `APP_BASE_URL` | 信件內連結的站台位址（登入連結必須有此設定或 Vercel 自動變數，不接受請求標頭） |
 | `CRON_SECRET` | Vercel Cron 呼叫 `/api/cron/*` 的 Bearer token（Vercel 會自動帶上）；未設定時排程端點只接受 manager session |
 | `SNAPSHOT_STALE_HOURS` | 快照多久沒更新算停擺（看門狗用，預設 30） |
+| `SCRAPER_SITES` | 看門狗期望每個平日都有掃描檔的院區：未設定＝本月曾上傳過的院區（自動，但看不到月初前就停掉的 scraper）；`none`＝scraper 刻意暫停，不判定缺檔；`main,hsinchu,bio,yunlin`＝明確指定，沒出現過也會報 |
 
 ## 尚未開始鍵入的表單
 
@@ -89,7 +90,7 @@ magic link 的連結 15 分鐘有效且只能用一次——`login_token` 表記
 | 路徑 | 台北時間 | 做什麼 |
 |---|---|---|
 | `/api/cron/snapshot` | 05:30 | 快照 → 推導 → 與基準線 diff → 寫 `work_event` → 更新基準線。漏跑只會延遲「新交接」資訊，不會弄丟工作（佇列永遠從最新快照即時推導）。實測約 **38 秒**（7,169 病人 × 32 單元），刻意壓在 Vercel Hobby 的 60 秒函式上限內 |
-| `/api/cron/watchdog` | 15:30 | 只管「系統自己壞了」：scraper 當日缺檔、快照停擺——這兩件事不會出現在任何佇列裡。每事件每日最多一封信，寄給負責人 |
+| `/api/cron/watchdog` | 15:30 | 只管「系統自己壞了」：scraper 當日缺檔（週末不判定；`SCRAPER_SITES=none` 時整個關掉）、快照停擺——這兩件事不會出現在任何佇列裡。每事件每日最多一封信，只寄給 `ALERT_EMAIL` / `GMAIL_USER` |
 
 手動觸發：manager 登入後直接 GET 這兩個路徑即可（不需要 CRON_SECRET）。
 

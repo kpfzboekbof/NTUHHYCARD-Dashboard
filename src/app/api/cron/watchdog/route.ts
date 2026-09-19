@@ -6,6 +6,7 @@ import { hasDatabase } from '@/lib/db/client';
 import { createTransporter, escapeHtml } from '@/lib/mailer';
 import { alreadySentToday, recordMailAttempt, markMailFailed, markMailSent } from '@/lib/db/outbound-mail';
 import { isTaipeiWeekend } from '@/lib/deadline';
+import { checkScraperFiles, scraperExpectation, type ScraperExpectation } from '@/lib/cron/scan-check';
 
 /**
  * GET /api/cron/watchdog — the one thing that may interrupt the operator.
@@ -72,7 +73,11 @@ async function checkBaseline(): Promise<Alert | null> {
   };
 }
 
-async function checkScans(): Promise<Alert | null> {
+async function checkScans(expected: ScraperExpectation): Promise<Alert | null> {
+  // SCRAPER_SITES=none: the scrapers are deliberately off (the hospital is
+  // hunting bots, 2026-09), so a missing file is the plan, not an outage.
+  if (expected === 'paused') return null;
+
   // The scrapers do not run at weekends. Two Saturday-and-Sunday alerts went
   // out before this line existed, each announcing that nothing had been
   // uploaded on a day nothing was ever going to be.
@@ -86,30 +91,19 @@ async function checkScans(): Promise<Alert | null> {
   const month = today.slice(0, 7);
   const { blobs } = await list({ prefix: `screening/${month}/` });
 
-  // The sites are whatever has uploaded this month — self-adapting, so a new
-  // scraper starts being watched by existing, and a retired one stops.
-  const seenSites = new Set<string>();
-  const todaySites = new Set<string>();
-  for (const blob of blobs) {
-    const base = blob.pathname.split('/').pop() ?? '';
-    if (!base.endsWith('.json') || base.endsWith('_reviews.json')) continue;
-    const name = base.slice(0, -5);
-    const sep = name.indexOf('__');
-    const date = sep > 0 ? name.slice(0, sep) : name;
-    const site = sep > 0 ? name.slice(sep + 2) : '(單一檔)';
-    seenSites.add(site);
-    if (date === today) todaySites.add(site);
-  }
-
-  if (seenSites.size === 0) return null; // month just started; nothing to compare against
-  const missing = [...seenSites].filter(site => !todaySites.has(site)).sort();
-  if (missing.length === 0) return null;
+  // In auto mode the sites are whatever has uploaded this month. That adapts
+  // to a new or retired scraper by itself, but it cannot see one that died
+  // before the month began — September 2026 had main and yunlin silent all
+  // month and every alert naming only the two 新竹 sites. Set SCRAPER_SITES
+  // explicitly to be told about a scraper that has never shown up.
+  const check = checkScraperFiles(blobs.map(b => b.pathname), today, expected);
+  if (!check || check.missing.length === 0) return null;
 
   return {
     kind: 'scan_missing',
-    subject: `OHCA Dashboard：今日 scraper 檔案缺 ${missing.length} 個院區`,
-    body: `今天（${today}）到 ${String(now.getHours()).padStart(2, '0')}:00 為止，這些院區還沒有上傳掃描檔：${missing.join('、')}。已上傳：${[...todaySites].sort().join('、') || '（無）'}。補救方式是院內手動重跑 scraper。`,
-    payload: { date: today, missing, uploaded: [...todaySites].sort() },
+    subject: `OHCA Dashboard：今日 scraper 檔案缺 ${check.missing.length} 個院區`,
+    body: `今天（${today}）到 ${String(now.getHours()).padStart(2, '0')}:00 為止，這些院區還沒有上傳掃描檔：${check.missing.join('、')}。已上傳：${check.uploaded.join('、') || '（無）'}。補救方式是院內手動重跑 scraper。`,
+    payload: { date: today, missing: check.missing, uploaded: check.uploaded },
   };
 }
 
@@ -142,11 +136,16 @@ async function alertRecipient(): Promise<{ personId: string | null; email: strin
 export async function GET(request: Request) {
   return runCronJob('watchdog', request, async () => {
     const results: Record<string, string> = {};
-    const alerts = (await Promise.all([checkBaseline(), checkScans()]))
+    const expected = scraperExpectation(process.env.SCRAPER_SITES);
+    // Written to the ledger so /admin/system shows the check is off on
+    // purpose, which looks nothing like a check that silently found nothing.
+    if (expected === 'paused') results.scan_missing = 'paused (SCRAPER_SITES=none)';
+
+    const alerts = (await Promise.all([checkBaseline(), checkScans(expected)]))
       .filter((alert): alert is Alert => alert !== null);
 
     if (alerts.length === 0) {
-      return { ok: true, result: { alerts: {} } };
+      return { ok: true, result: { alerts: results } };
     }
 
     const recipient = await alertRecipient();
